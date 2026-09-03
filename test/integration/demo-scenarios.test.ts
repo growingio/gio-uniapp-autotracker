@@ -45,9 +45,7 @@ describe('demo scenarios', () => {
     expect(main).toContain('uniVue: app')
     expect(main).not.toMatch(/deviceIdFactory|sessionIdFactory|createGioTracker|createAppLifecycleBridge|createPageLifecycleBridge/)
 
-    const declaration = demoFile('gdp.d.ts')
-    expect(declaration).toContain("import type { gdp as gdpCommand } from '@/uni_modules/gio-uniapp-autotracker/index.js'")
-    expect(declaration).toContain('const gdp: typeof gdpCommand')
+    expect(demoFile('main.ts')).toContain("import gdp from '@/uni_modules/gio-uniapp-autotracker/index.js'")
 
     const pages = JSON.parse(demoFile('pages.json')) as Readonly<{ pages: readonly { path: string }[]; tabBar: { list: readonly { pagePath: string }[] } }>
     const expected = ['index', 'custom-event', 'user', 'lifecycle', 'autotrack', 'route', 'datacollect', 'capabilities']

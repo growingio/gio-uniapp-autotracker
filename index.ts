@@ -34,6 +34,8 @@ export type GioGdpInitOptions = Omit<GioInitOptions, 'accountId' | 'dataSourceId
   sdkVersion?: string
 }>
 
+export type GdpCommand = (command: unknown, ...args: readonly unknown[]) => boolean
+
 function record(value: unknown): Readonly<Record<string, unknown>> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
     ? value as Readonly<Record<string, unknown>>
@@ -130,6 +132,11 @@ export function gdp(command: unknown, ...args: readonly unknown[]): boolean {
     case 'clearLocation': return gdpTracker.clearLocation()
     default: return false
   }
+}
+
+declare global {
+  /** SDK-owned command entry available to uni-app pages after the root SDK is imported in main.ts. */
+  const gdp: GdpCommand
 }
 
 ;(globalThis as Record<string, unknown>).gdp = gdp

@@ -5,7 +5,6 @@ import { transformAutoTrackSfc } from '../autotrack/vite.js'
 const root = resolve(import.meta.dirname, '..')
 const required = [
   'demo/App.vue',
-  'demo/gdp.d.ts',
   'autotrack.ts',
   'demo/vite.config.ts',
   'demo/pages/index/index.vue',
@@ -64,6 +63,10 @@ for (const file of ['index.js', 'index.d.ts', 'vite.js', 'autotrack.js', 'packag
 }
 if (/from\s+['"][^'"]+\.ts['"]/.test(readFileSync(resolve(compiledPackage, 'index.js'), 'utf8'))) {
   throw new Error('demo must consume compiled JavaScript, not TypeScript source')
+}
+const compiledTypes = readFileSync(resolve(compiledPackage, 'index.d.ts'), 'utf8')
+if (!compiledTypes.includes('declare global') || !compiledTypes.includes('const gdp: GdpCommand')) {
+  throw new Error('SDK root type entry must declare the global gdp command for application pages')
 }
 
 const pages = readFileSync(resolve(root, 'demo/pages.json'), 'utf8')
