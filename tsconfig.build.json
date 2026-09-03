@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "declarationMap": false,
+    "sourceMap": false,
+    "outDir": "./demo/uni_modules/gio-uniapp-autotracker",
+    "rootDir": "."
+  },
+  "include": [
+    "index.ts",
+    "autotrack.ts",
+    "vite.ts",
+    "core/**/*.ts",
+    "runtime/**/*.ts",
+    "platform/**/*.ts",
+    "autotrack/**/*.ts"
+  ]
+}

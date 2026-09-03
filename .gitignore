@@ -3,4 +3,5 @@ coverage/
 test-results/
 demo/unpackage/
 demo/dist/
+demo/uni_modules/
 demo/.hbuilderx/
