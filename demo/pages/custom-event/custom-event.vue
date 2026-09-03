@@ -7,7 +7,6 @@
     <view class="section">
       <button data-title="发送商品曝光事件" @click="trackProduct">发送 product_exposure</button>
       <button data-title="发送边界属性事件" @click="trackBoundary">发送含边界属性的事件</button>
-      <button data-title="设置用户属性" @click="setAttributes">设置用户属性</button>
       <button class="secondary" data-title="发送非法事件名" @click="trackInvalid">尝试非法事件名</button>
       <button class="secondary" data-title="调用未知命令" @click="unknownCommand">尝试未知命令</button>
     </view>
@@ -39,10 +38,6 @@ export default {
       this.result = ok
         ? '事件已入队：collector 中应只保留 kept 和 labels，嵌套对象与 NaN 会被剔除。'
         : '未入队：先开启采集开关。'
-    },
-    setAttributes() {
-      const ok = gdp('setUserAttributes', { memberLevel: 'demo', campaign: 'uni-app-showcase' })
-      this.showResult('setUserAttributes', ok)
     },
     trackInvalid() {
       const ok = gdp('track', '', { ignored: true })

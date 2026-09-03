@@ -14,7 +14,6 @@ const required = [
   'demo/pages/autotrack/autotrack.vue',
   'demo/pages/route/route.vue',
   'demo/pages/datacollect/datacollect.vue',
-  'demo/pages/capabilities/capabilities.vue',
 ]
 
 for (const file of required) {
@@ -72,9 +71,9 @@ for (const declaration of ['interface GdpCommand', 'type GioGdpInitOptions', 'ty
   if (!compiledTypes.includes(declaration)) throw new Error(`SDK root type entry is missing customer declaration: ${declaration}`)
 }
 
-const pages = readFileSync(resolve(root, 'demo/pages.json'), 'utf8')
-for (const route of ['custom-event', 'user', 'lifecycle', 'autotrack', 'route', 'datacollect', 'capabilities']) {
-  if (!pages.includes(`pages/${route}/${route}`)) throw new Error(`pages.json is missing ${route}`)
+const pageConfig = JSON.parse(readFileSync(resolve(root, 'demo/pages.json'), 'utf8')) as Readonly<{ pages?: readonly { path?: unknown }[] }>
+for (const route of ['custom-event', 'user', 'lifecycle', 'autotrack', 'route', 'datacollect']) {
+  if (!pageConfig.pages?.some((page) => page.path === `pages/${route}/${route}`)) throw new Error(`pages.json is missing ${route}`)
 }
 
 const autoTrackPage = readFileSync(resolve(root, 'demo/pages/autotrack/autotrack.vue'), 'utf8')

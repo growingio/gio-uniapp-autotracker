@@ -16,6 +16,11 @@
       </view>
     </view>
     <view class="section">
+      <text class="section-title">当前能力边界</text>
+      <text class="hint">已支持：生命周期、PAGE 上下文、自定义事件、用户身份与属性、dataCollect 开关，以及 Vue 3 原生组件无埋点。</text>
+      <text class="hint">当前未实现：gioABTest、微信分享、.nvue 与 Vue 2 / Webpack 无埋点。SDK 不会伪造这些能力的成功结果。</text>
+    </view>
+    <view class="section">
       <text class="section-title">快捷动作</text>
       <button data-title="发送首页自定义事件" @click="trackQuick">发送 home_quick_track</button>
       <button class="secondary" data-title="带参数前往路由页" @click="goRoute">前往路由页（带参数）</button>
@@ -36,7 +41,6 @@ export default {
         { path: 'autotrack', title: '④ 无埋点 / VIEW_CLICK / VIEW_CHANGE', description: '由 Vite 插桩验证点击、变更、忽略和敏感值规则。' },
         { path: 'route', title: '⑤ 路由 / query / referralPage', description: '带 query 跳转，验证 PAGE 上下文。' },
         { path: 'datacollect', title: '⑥ 数据采集开关 / setOptions', description: '动态开启或关闭采集，并检查返回值。' },
-        { path: 'capabilities', title: '⑦ ABTest / 分享能力边界', description: '与 uni-app x demo 对照：本 SDK 尚未支持的能力不会伪造。' },
       ],
     }
   },

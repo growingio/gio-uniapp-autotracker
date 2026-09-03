@@ -48,7 +48,7 @@ describe('demo scenarios', () => {
     expect(demoFile('main.ts')).toContain("import gdp from '@/uni_modules/gio-uniapp-autotracker/index.js'")
 
     const pages = JSON.parse(demoFile('pages.json')) as Readonly<{ pages: readonly { path: string }[]; tabBar: { list: readonly { pagePath: string }[] } }>
-    const expected = ['index', 'custom-event', 'user', 'lifecycle', 'autotrack', 'route', 'datacollect', 'capabilities']
+    const expected = ['index', 'custom-event', 'user', 'lifecycle', 'autotrack', 'route', 'datacollect']
     expect(pages.pages.map((page) => page.path)).toStrictEqual(expected.map((name) => `pages/${name}/${name}`))
     expect(pages.tabBar.list.map((page) => page.pagePath)).toStrictEqual([
       'pages/index/index', 'pages/custom-event/custom-event', 'pages/user/user', 'pages/autotrack/autotrack',
@@ -56,7 +56,7 @@ describe('demo scenarios', () => {
 
     const commandExpectations: Readonly<Record<string, readonly string[]>> = {
       'pages/index/index.vue': ["gdp('track', 'home_quick_track'"],
-      'pages/custom-event/custom-event.vue': ["gdp('track', 'product_exposure'", "gdp('setUserAttributes'", "gdp('not_a_public_command')"],
+      'pages/custom-event/custom-event.vue': ["gdp('track', 'product_exposure'", "gdp('not_a_public_command')"],
       'pages/user/user.vue': ["gdp('setUserId'", "gdp('clearUserId')", "gdp('setUserAttributes'", "gdp('setLocation'", "gdp('clearLocation'"],
       'pages/lifecycle/lifecycle.vue': ["gdp('track', 'lifecycle_demo_action'", "gdp('registerPlugins'"],
       'pages/datacollect/datacollect.vue': ["gdp('setOptions'", "gdp('track', 'datacollect_test_event'"],
@@ -67,6 +67,8 @@ describe('demo scenarios', () => {
       expect(source).not.toContain('$gio')
       expect(source).not.toMatch(/from\s+['"]@\/gio['"]|from\s+['"].*index\.js['"]/)
     }
+    expect(demoFile('pages/custom-event/custom-event.vue')).not.toContain("gdp('setUserAttributes'")
+    expect(demoFile('pages/index/index.vue')).toContain('当前能力边界')
   })
 
   it('compiles the actual autotrack showcase with the compiled dispatcher and preserves privacy gates', () => {
