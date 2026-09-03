@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const output = resolve(root, process.argv[2] ?? 'release/uni_modules/gio-uniapp-autotracker')
-const expected = new Set(['README.md', 'autotrack', 'core', 'doc', 'index.ts', 'package.json', 'platform', 'runtime', 'tsconfig.json', 'vite.ts'])
+const expected = new Set(['README.md', 'autotrack', 'autotrack.ts', 'core', 'doc', 'index.ts', 'package.json', 'platform', 'runtime', 'tsconfig.json', 'vite.ts'])
 
 async function main(): Promise<void> {
   const outputRelative = relative(root, output)
@@ -24,7 +24,7 @@ async function main(): Promise<void> {
   if (packageJson.name !== 'gio-uniapp-autotracker' || packageJson.type !== 'module' || packageJson.private !== false || packageJson.types !== './index.ts') {
     throw new Error('release_package_metadata_invalid')
   }
-  if (JSON.stringify(packageJson.exports) !== JSON.stringify({ '.': './index.ts', './vite': './vite.ts' })) throw new Error('release_exports_invalid')
+  if (JSON.stringify(packageJson.exports) !== JSON.stringify({ '.': './index.ts', './vite': './vite.ts', './autotrack': './autotrack.ts' })) throw new Error('release_exports_invalid')
   if (typeof packageJson.dependencies !== 'object' || packageJson.dependencies === null || !('@vue/compiler-dom' in packageJson.dependencies)) {
     throw new Error('release_vite_dependency_missing')
   }

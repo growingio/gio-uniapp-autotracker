@@ -1,25 +1,139 @@
 import { createAppTracker, type AppRuntimeHost, type AppRuntimeOptions } from './platform/app-runtime.js'
+import type { GioInitOptions } from './core/config.js'
+import type { GioBuiltinPlugin } from './core/plugin-registry.js'
 import { TrackerRuntime } from './runtime/tracker.js'
+import { installUniAppLifecycle, type UniAppVueApp } from './runtime/uniapp-installer.js'
 
 let singleton: TrackerRuntime | null = null
+let gdpTracker: TrackerRuntime | null = null
+let pendingGdpPlugins: readonly GdpPlugin[] = []
+
+/**
+ * The sole intentional escape hatch to the internal runtime. A customer plugin receives it only
+ * during its explicit registration lifecycle; application code must continue to use `gdp()`.
+ */
+export type GioPlugin = Readonly<{
+  name: string
+  install: (growingio: TrackerRuntime) => void
+}>
+
+type GdpPlugin = GioBuiltinPlugin | GioPlugin
 
 /**
  * The App profile is intentionally singleton-only: repeated calls return the first runtime and
  * never create duplicate lifecycle listeners, queues, storage namespaces, or uploaders.
  */
-export function createGioTracker(host: AppRuntimeHost, options: AppRuntimeOptions): TrackerRuntime {
+function createGioTracker(host: AppRuntimeHost, options: AppRuntimeOptions): TrackerRuntime {
   if (singleton === null) singleton = createAppTracker(host, options)
   return singleton
 }
 
-export { allAppCapabilityProfiles, appCapabilityProfile } from './platform/capabilities.js'
-export { appEntrySnapshot, createAppLifecycleBridge, querySnapshot } from './runtime/app-bridge.js'
-export { createPageLifecycleBridge } from './runtime/page-bridge.js'
-export { dispatchAutoTrack, installAutoTrackDispatcher } from './runtime/autotrack-dispatch.js'
-export { createGioVueRuntime } from './runtime/vue-runtime.js'
-export type { AppEntrySnapshot } from './runtime/app-lifecycle.js'
-export type { PageLoadInput, PageSnapshot } from './core/page-store.js'
-export type { AppRuntimeHost, AppRuntimeOptions }
-export type { AppCapabilityProfile } from './platform/capabilities.js'
+export type GioGdpInitOptions = Omit<GioInitOptions, 'accountId' | 'dataSourceId'> & Readonly<{
+  /** The Vue app returned by createSSRApp(App); it enables SDK-owned App/Page lifecycle hooks. */
+  uniVue: UniAppVueApp
+  sdkVersion?: string
+}>
+
+function record(value: unknown): Readonly<Record<string, unknown>> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Readonly<Record<string, unknown>>
+    : null
+}
+
+function appHost(): AppRuntimeHost | null {
+  const candidate = record((globalThis as Readonly<Record<string, unknown>>).uni)
+  const required = ['getStorageSync', 'setStorageSync', 'removeStorageSync', 'getDeviceInfo', 'getSystemInfoSync', 'getAppBaseInfo', 'getNetworkType', 'request']
+  return candidate !== null && required.every((name) => typeof candidate[name] === 'function')
+    ? candidate as unknown as AppRuntimeHost
+    : null
+}
+
+function generatedId(prefix: string): string {
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+}
+
+function isUniVueApp(value: unknown): value is UniAppVueApp {
+  const candidate = record(value)
+  return candidate !== null && typeof candidate.mixin === 'function'
+}
+
+function isBuiltinPlugin(value: unknown): value is GioBuiltinPlugin {
+  const candidate = record(value)
+  const options = record(candidate?.options)
+  return candidate?.name === 'gioEventAutoTracking'
+    && (candidate.options === undefined || (options !== null && Object.keys(options).length === 0))
+}
+
+function isCustomerPlugin(value: unknown): value is GioPlugin {
+  const candidate = record(value)
+  return candidate !== null && typeof candidate.name === 'string' && candidate.name.trim() !== '' && typeof candidate.install === 'function'
+}
+
+function pluginName(plugin: GdpPlugin): string {
+  return plugin.name
+}
+
+function registerGdpPlugins(value: unknown): boolean {
+  if (!Array.isArray(value) || gdpTracker !== null) return false
+  const plugins = value.filter((plugin): plugin is GdpPlugin => isBuiltinPlugin(plugin) || isCustomerPlugin(plugin))
+  if (plugins.length !== value.length) return false
+  const names = new Set(pendingGdpPlugins.map(pluginName))
+  for (const plugin of plugins) {
+    const name = pluginName(plugin)
+    if (names.has(name)) return false
+    names.add(name)
+  }
+  pendingGdpPlugins = [...pendingGdpPlugins, ...plugins]
+  return true
+}
+
+/**
+ * Command entry aligned with the standalone mini-program SDK. Integration requires only main.ts:
+ * register plugins, then pass the Vue app as `uniVue` to init. The SDK reads the real global `uni`
+ * host and owns App/Page lifecycle forwarding itself. Application code has no tracker object;
+ * all normal calls remain gdp commands.
+ */
+export function gdp(command: unknown, ...args: readonly unknown[]): boolean {
+  if (command === 'registerPlugins') return registerGdpPlugins(args[0])
+  if (command === 'init') {
+    if (gdpTracker !== null || typeof args[0] !== 'string' || typeof args[1] !== 'string') return false
+    const input = record(args[2])
+    const host = appHost()
+    if (input === null || host === null || !isUniVueApp(input.uniVue)) return false
+    const { uniVue, sdkVersion, ...init } = input
+    const tracker = createGioTracker(host, {
+      sdkVersion: typeof sdkVersion === 'string' && sdkVersion.trim() !== '' ? sdkVersion : '0.1.0',
+      deviceIdFactory: () => generatedId('device'),
+      sessionIdFactory: () => generatedId('session'),
+    })
+    const builtinPlugins = pendingGdpPlugins.filter(isBuiltinPlugin)
+    if (!tracker.registerPlugins(...builtinPlugins) || !tracker.init({ ...init, accountId: args[0], dataSourceId: args[1] })) return false
+    installUniAppLifecycle(uniVue, tracker)
+    gdpTracker = tracker
+    for (const plugin of pendingGdpPlugins.filter(isCustomerPlugin)) {
+      try {
+        plugin.install(tracker)
+      } catch {
+        globalThis.console?.warn(`[GrowingIO]: custom plugin install failed (${plugin.name})`)
+      }
+    }
+    return true
+  }
+  if (gdpTracker === null) return false
+  switch (command) {
+    case 'track': return gdpTracker.track(args[0], args[1])
+    case 'setUserId': return gdpTracker.setUserId(args[0], args[1])
+    case 'clearUserId': return gdpTracker.clearUserId()
+    case 'setUserAttributes': return gdpTracker.setUserAttributes(args[0])
+    case 'setOptions': return gdpTracker.setOptions(args[0])
+    case 'setLocation': return gdpTracker.setLocation(args[0], args[1])
+    case 'clearLocation': return gdpTracker.clearLocation()
+    default: return false
+  }
+}
+
+;(globalThis as Record<string, unknown>).gdp = gdp
+
+export default gdp
+
 export type { GioInitOptions } from './core/config.js'
-export type { GioVueApp, GioVueRuntime } from './runtime/vue-runtime.js'

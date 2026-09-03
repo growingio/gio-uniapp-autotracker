@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const output = resolve(root, process.argv[2] ?? 'release/uni_modules/gio-uniapp-autotracker')
-const allowed = ['README.md', 'index.ts', 'vite.ts', 'tsconfig.json', 'core', 'runtime', 'platform', 'autotrack', 'doc']
+const allowed = ['README.md', 'index.ts', 'autotrack.ts', 'vite.ts', 'tsconfig.json', 'core', 'runtime', 'platform', 'autotrack', 'doc']
 const forbidden = ['demo', 'test', 'scripts', 'pnpm-lock.yaml', '.git', '.env']
 
 function exists(path: string): Promise<boolean> {
@@ -23,7 +23,7 @@ async function main(): Promise<void> {
   const releasePackage = {
     ...packageJson,
     private: false,
-    exports: { '.': './index.ts', './vite': './vite.ts' },
+    exports: { '.': './index.ts', './vite': './vite.ts', './autotrack': './autotrack.ts' },
     types: './index.ts',
     scripts: undefined,
     devDependencies: undefined,

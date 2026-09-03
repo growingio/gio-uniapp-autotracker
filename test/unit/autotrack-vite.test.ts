@@ -101,6 +101,8 @@ describe('transformAutoTrackTemplate', () => {
   it('supports the documented options form and can disable transformation', () => {
     const disabled = gioUniappAutoTrack({ enabled: false })
     expect(disabled.transform('<template><view @click="go" /></template>', 'page.vue')).toBeNull()
+    const defaultPlugin = gioUniappAutoTrack()
+    expect(defaultPlugin.transform('<template><view @click="go" /></template>', 'page.vue')?.code).toContain('from "gio-uniapp-autotracker/autotrack"')
     const configured = gioUniappAutoTrack({ runtimeImport: '@sdk/runtime' })
     expect(configured.transform('<template><view @click="go" /></template>', 'page.vue')?.code).toContain('from "@sdk/runtime"')
   })

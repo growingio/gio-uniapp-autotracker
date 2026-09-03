@@ -8,22 +8,51 @@ describe('public API', () => {
     expect(runtimeApi).not.toHaveProperty('gioUniappAutoTrack')
   })
 
-  it('returns one App runtime for repeated createGioTracker calls', async () => {
+  it('exposes only the mini-program-style command entry, not host or identity factories', async () => {
+    const runtimeApi = await import('../../index.js')
+    expect(runtimeApi).not.toHaveProperty('createAppTracker')
+    expect(runtimeApi).not.toHaveProperty('createGioTracker')
+    expect(runtimeApi).not.toHaveProperty('installGioUniApp')
+    expect(runtimeApi).not.toHaveProperty('dispatchAutoTrack')
+    expect(runtimeApi).not.toHaveProperty('TrackerRuntime')
+    expect(runtimeApi).toHaveProperty('gdp')
+    expect(runtimeApi).toHaveProperty('default')
+  })
+
+  it('initializes from the global uni host without caller-provided device or session factories', async () => {
     vi.resetModules()
-    const { createGioTracker } = await import('../../index.js')
+    const originalUni = (globalThis as Record<string, unknown>).uni
+    const app = {
+      config: { globalProperties: {} as Record<string, unknown> },
+      mixin: vi.fn(),
+      use: vi.fn(),
+    }
     const host: AppRuntimeHost = {
-      getStorageSync: () => undefined, setStorageSync: () => undefined, removeStorageSync: () => undefined,
-      getDeviceInfo: () => ({ platform: 'android' }), getSystemInfoSync: () => ({}), getAppBaseInfo: () => ({}),
+      getStorageSync: () => undefined,
+      setStorageSync: () => undefined,
+      removeStorageSync: () => undefined,
+      getDeviceInfo: () => ({ platform: 'android' }),
+      getSystemInfoSync: () => ({}),
+      getAppBaseInfo: () => ({}),
       getNetworkType: (options) => { options.success({}) },
       request: () => undefined,
     }
-    const options = { sdkVersion: '0.1.0', deviceIdFactory: () => 'device-1', sessionIdFactory: () => 'session-1' }
+    ;(globalThis as Record<string, unknown>).uni = host
 
-    expect(createGioTracker(host, options)).toBe(createGioTracker(host, options))
-  })
-
-  it('does not expose the multi-instance assembly helper from the public runtime entry', async () => {
-    const runtimeApi = await import('../../index.js')
-    expect(runtimeApi).not.toHaveProperty('createAppTracker')
+    try {
+      const { gdp } = await import('../../index.js')
+      expect(gdp('registerPlugins', [{ name: 'gioEventAutoTracking' }])).toBe(true)
+      const install = vi.fn()
+      expect(gdp('registerPlugins', [{ name: 'customer-plugin', install }])).toBe(true)
+      expect(gdp('init', 'account', 'source', { uniVue: app, dataCollect: false })).toBe(true)
+      expect(app.use).not.toHaveBeenCalled()
+      expect(app.mixin).toHaveBeenCalledOnce()
+      expect(app.config.globalProperties.$gio).toBeUndefined()
+      expect(install).toHaveBeenCalledOnce()
+      expect(install.mock.calls[0]?.[0]).toMatchObject({ track: expect.any(Function) })
+    } finally {
+      if (originalUni === undefined) delete (globalThis as Record<string, unknown>).uni
+      else (globalThis as Record<string, unknown>).uni = originalUni
+    }
   })
 })
