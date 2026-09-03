@@ -48,7 +48,7 @@ describe('demo scenarios', () => {
     expect(demoFile('main.ts')).toContain("import gdp from '@/uni_modules/gio-uniapp-autotracker/index.js'")
 
     const pages = JSON.parse(demoFile('pages.json')) as Readonly<{ pages: readonly { path: string }[]; tabBar: { list: readonly { pagePath: string }[] } }>
-    const expected = ['index', 'custom-event', 'user', 'lifecycle', 'autotrack', 'route', 'datacollect', 'capabilities']
+    const expected = ['index', 'custom-event', 'user', 'lifecycle', 'autotrack', 'route', 'datacollect', 'boundary', 'capabilities']
     expect(pages.pages.map((page) => page.path)).toStrictEqual(expected.map((name) => `pages/${name}/${name}`))
     expect(pages.tabBar.list.map((page) => page.pagePath)).toStrictEqual([
       'pages/index/index', 'pages/custom-event/custom-event', 'pages/user/user', 'pages/autotrack/autotrack',
@@ -60,6 +60,7 @@ describe('demo scenarios', () => {
       'pages/user/user.vue': ["gdp('setUserId'", "gdp('clearUserId')", "gdp('setUserAttributes'"],
       'pages/lifecycle/lifecycle.vue': ["gdp('track', 'lifecycle_demo_action'"],
       'pages/datacollect/datacollect.vue': ["gdp('setOptions'", "gdp('track', 'datacollect_test_event'"],
+      'pages/boundary/boundary.vue': ["gdp('registerPlugins'", "gdp('not_a_public_command')", "gdp('setOptions'", "gdp('setUserId'", "gdp('setLocation'", "gdp('track', 'boundary_attribute_filter'"],
     }
     for (const [path, commands] of Object.entries(commandExpectations)) {
       const source = demoFile(path)
@@ -102,6 +103,8 @@ describe('demo scenarios', () => {
       expect(globalThis.gdp).toBe(gdp)
       expect(hooks).not.toBeNull()
       expect(growingio).not.toBeNull()
+      expect(gdp('registerPlugins', [{ name: 'gioEventAutoTracking' }])).toBe(false)
+      expect(gdp('init', 'demo-account', 'demo-source', { uniVue: app, dataCollect: false, idMapping: true })).toBe(false)
 
       const lifecycle = hooks as LifecycleHooks
       lifecycle.onLaunch.call({}, { path: 'pages/index/index', query: { campaign: 'demo' } })
@@ -110,9 +113,13 @@ describe('demo scenarios', () => {
       lifecycle.onLoad.call(page, { from: 'index', mode: 'scenario' })
       lifecycle.onShow.call(page, {})
 
-      expect(gdp('track', 'blocked_before_consent')).toBe(false)
       const untypedGdp = gdp as (command: unknown, ...args: readonly unknown[]) => boolean
+      expect(gdp('track', 'blocked_before_consent')).toBe(false)
       expect(untypedGdp('setOptions', { dataCollect: 'true' })).toBe(false)
+      expect(untypedGdp('setOptions', { dataCollect: true, debug: true })).toBe(false)
+      expect(untypedGdp('setUserId', 12345)).toBe(false)
+      expect(gdp('setLocation', 91, 120)).toBe(false)
+      expect(gdp('track', '', { ignored: true })).toBe(false)
       expect(gdp('setOptions', { dataCollect: true })).toBe(true)
       const tracker = growingio as TrackerRuntime
       await tracker.whenReady()
@@ -121,6 +128,9 @@ describe('demo scenarios', () => {
       expect(gdp('setUserId', 'demo-user-001', 'email')).toBe(true)
       expect(gdp('setUserAttributes', { membership: 'demo', source: 'scenario' })).toBe(true)
       expect(gdp('track', 'demo_purchase_after_identity', { sku: 'demo-sku-002' })).toBe(true)
+      expect(untypedGdp('track', 'boundary_attribute_filter', {
+        kept: 'yes', labels: ['demo', true, 1], nested: { mustBeDiscarded: true }, nonFinite: Number.NaN,
+      })).toBe(true)
       expect(gdp('setLocation', 30.2741, 120.1551)).toBe(true)
       expect(gdp('clearLocation')).toBe(true)
       expect(untypedGdp('not_a_public_command')).toBe(false)
@@ -151,6 +161,9 @@ describe('demo scenarios', () => {
       })
       expect(events.find((event) => event.eventName === 'demo_purchase_after_identity')).toMatchObject({
         attributes: { sku: 'demo-sku-002' }, userId: 'demo-user-001',
+      })
+      expect(events.find((event) => event.eventName === 'boundary_attribute_filter')).toMatchObject({
+        attributes: { kept: 'yes', labels: 'demo||true||1' },
       })
       const click = events.find((event) => event.eventType === 'VIEW_CLICK')
       expect(click).toMatchObject({ xpath: '/button[1]', textValue: '普通无埋点按钮', index: 1 })

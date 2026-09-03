@@ -36,7 +36,8 @@ export default {
         { path: 'autotrack', title: '④ 无埋点 / VIEW_CLICK / VIEW_CHANGE', description: '由 Vite 插桩验证点击、变更、忽略和敏感值规则。' },
         { path: 'route', title: '⑤ 路由 / query / referralPage', description: '带 query 跳转，验证 PAGE 上下文。' },
         { path: 'datacollect', title: '⑥ 数据采集开关 / setOptions', description: '动态开启或关闭采集，并检查返回值。' },
-        { path: 'capabilities', title: '⑦ ABTest / 分享能力边界', description: '与 uni-app x demo 对照：本 SDK 尚未支持的能力不会伪造。' },
+        { path: 'boundary', title: '⑦ 命令边界 / 失败安全', description: '验证重复插件、未知命令、非法参数和属性归一化。' },
+        { path: 'capabilities', title: '⑧ ABTest / 分享能力边界', description: '与 uni-app x demo 对照：本 SDK 尚未支持的能力不会伪造。' },
       ],
     }
   },
