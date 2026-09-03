@@ -1,0 +1,11 @@
+{
+  "name": "gio-uniapp-autotracker-stage0",
+  "appid": "__UNI__GIO_STAGE0__",
+  "description": "Traditional uni-app SDK stage 0 verification demo",
+  "versionName": "0.1.0",
+  "versionCode": "100",
+  "app-plus": {
+    "usingComponents": true
+  },
+  "vueVersion": "3"
+}

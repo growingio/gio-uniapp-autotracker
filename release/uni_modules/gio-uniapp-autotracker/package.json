@@ -1,0 +1,18 @@
+{
+  "name": "gio-uniapp-autotracker",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Traditional uni-app Vue 3 App analytics SDK",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@vue/compiler-dom": "^3.5.13"
+  },
+  "exports": {
+    ".": "./index.ts",
+    "./vite": "./vite.ts"
+  },
+  "types": "./index.ts"
+}
