@@ -1,0 +1,55 @@
+import { describe, expect, it } from 'vitest'
+
+import { IdentityPersistence } from '../../core/identity-persistence.js'
+import { serializeIdentityRecord } from '../../core/identity.js'
+import type { StoragePort } from '../../core/ports.js'
+
+function port(read: Awaited<ReturnType<StoragePort['read']>>): { port: StoragePort; writes: string[]; removals: string[] } {
+  const writes: string[] = []
+  const removals: string[] = []
+  return {
+    port: {
+      persistentQueue: true,
+      read: async () => read,
+      write: async (_area, _key, value) => { writes.push(value); return { kind: 'ok' } },
+      remove: async (_area, key) => { removals.push(key); return { kind: 'ok' } },
+    },
+    writes,
+    removals,
+  }
+}
+
+describe('IdentityPersistence', () => {
+  it('restores a protected record without generating or rewriting identity', async () => {
+    const value = serializeIdentityRecord({ deviceId: 'visitor', userId: 'A', userKey: null }, 'source')
+    const backend = port({ kind: 'value', value })
+    const persistence = new IdentityPersistence(backend.port, 'gio:v1:source:identity', 'source', () => 'new-visitor')
+    await expect(persistence.hydrate()).resolves.toStrictEqual({
+      identity: { deviceId: 'visitor', userId: 'A', userKey: null }, source: 'restored',
+    })
+    expect(backend.writes).toStrictEqual([])
+  })
+
+  it('migrates a valid legacy record only by writing the encrypted replacement', async () => {
+    const legacy = JSON.stringify({ version: 1, expiresAt: null, value: { deviceId: 'visitor', userId: null, userKey: null } })
+    const backend = port({ kind: 'value', value: legacy })
+    const persistence = new IdentityPersistence(backend.port, 'gio:v1:source:identity', 'source', () => 'new-visitor')
+    await expect(persistence.hydrate()).resolves.toMatchObject({ source: 'legacy', identity: { deviceId: 'visitor' } })
+    expect(backend.writes).toHaveLength(1)
+    expect(backend.writes[0]).not.toContain('"visitor"')
+  })
+
+  it('generates on a missing record and removes only the identity key after corruption', async () => {
+    const missing = port({ kind: 'missing' })
+    await expect(new IdentityPersistence(missing.port, 'gio:v1:source:identity', 'source', () => 'generated').hydrate()).resolves.toStrictEqual({
+      identity: { deviceId: 'generated', userId: null, userKey: null }, source: 'generated',
+    })
+    expect(missing.writes).toHaveLength(1)
+    expect(missing.writes[0]).not.toContain('generated')
+
+    const corrupt = port({ kind: 'value', value: '{bad' })
+    await expect(new IdentityPersistence(corrupt.port, 'gio:v1:source:identity', 'source', () => 'generated').hydrate()).resolves.toMatchObject({ source: 'corrupt' })
+    expect(corrupt.removals).toStrictEqual(['gio:v1:source:identity'])
+    expect(corrupt.writes).toHaveLength(1)
+  })
+})

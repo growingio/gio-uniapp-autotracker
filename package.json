@@ -1,0 +1,28 @@
+{
+  "name": "gio-uniapp-autotracker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Traditional uni-app Vue 3 App analytics SDK",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "check": "pnpm run typecheck && pnpm run test",
+    "typecheck": "tsc --noEmit -p tsconfig.dev.json",
+    "test": "vitest run",
+    "test:contract": "vitest run test/protocol-contract test/integration",
+    "mock:collector": "tsx scripts/mock-collector.ts",
+    "release:prepare": "tsx scripts/prepare-release.ts",
+    "release:check": "tsx scripts/check-release.ts && tsc --noEmit -p release/uni_modules/gio-uniapp-autotracker/tsconfig.json"
+  },
+  "dependencies": {
+    "@vue/compiler-dom": "^3.5.13"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.24",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.4"
+  }
+}

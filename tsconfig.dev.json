@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node", "vitest/globals"]
+  },
+  "include": [
+    "index.ts",
+    "vite.ts",
+    "core/**/*.ts",
+    "runtime/**/*.ts",
+    "platform/**/*.ts",
+    "autotrack/**/*.ts",
+    "scripts/**/*.ts",
+    "test/**/*.ts",
+    "vitest.config.ts"
+  ]
+}

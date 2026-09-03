@@ -1,0 +1,5 @@
+node_modules/
+coverage/
+test-results/
+demo/unpackage/
+demo/dist/
