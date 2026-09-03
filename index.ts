@@ -8,15 +8,6 @@ let singleton: TrackerRuntime | null = null
 let gdpTracker: TrackerRuntime | null = null
 let pendingGdpPlugins: readonly GdpPlugin[] = []
 
-/**
- * The sole intentional escape hatch to the internal runtime. A customer plugin receives it only
- * during its explicit registration lifecycle; application code must continue to use `gdp()`.
- */
-export type GioPlugin = Readonly<{
-  name: string
-  install: (growingio: TrackerRuntime) => void
-}>
-
 type GdpPlugin = GioBuiltinPlugin | GioPlugin
 
 /**
@@ -28,13 +19,49 @@ function createGioTracker(host: AppRuntimeHost, options: AppRuntimeOptions): Tra
   return singleton
 }
 
+/** Minimal Vue App shape required by the SDK lifecycle installer. `createSSRApp(App)` satisfies it. */
+export type GioUniVueApp = UniAppVueApp
+
 export type GioGdpInitOptions = Omit<GioInitOptions, 'accountId' | 'dataSourceId'> & Readonly<{
   /** The Vue app returned by createSSRApp(App); it enables SDK-owned App/Page lifecycle hooks. */
-  uniVue: UniAppVueApp
+  uniVue: GioUniVueApp
   sdkVersion?: string
 }>
 
-export type GdpCommand = (command: unknown, ...args: readonly unknown[]) => boolean
+/** Values that are normalized into a GrowingIO event or user-attribute string. */
+export type GioAttributeScalar = string | number | boolean | Date | null | undefined
+export type GioAttributeValue = GioAttributeScalar | readonly GioAttributeScalar[]
+export type GioAttributes = Readonly<Record<string, GioAttributeValue>>
+
+/** `dataCollect` is the sole initialization option that can change at runtime. */
+export type GioMutableOptions = Readonly<{ dataCollect: boolean }>
+
+/** The internal instance is available only as the argument of an explicitly registered customer plugin. */
+export type GioPluginRuntime = TrackerRuntime
+
+export type GioPlugin = Readonly<{
+  name: string
+  install: (growingio: GioPluginRuntime) => void
+}>
+
+export type GioPluginRegistration = GioBuiltinPlugin | GioPlugin
+
+/**
+ * The complete customer-facing command surface. This intentionally has no catch-all overload:
+ * an unknown command or a mismatched argument list is a TypeScript error before it can reach the
+ * runtime's defensive `false` fallback.
+ */
+export interface GdpCommand {
+  (command: 'registerPlugins', plugins: readonly GioPluginRegistration[]): boolean
+  (command: 'init', accountId: string, dataSourceId: string, options: GioGdpInitOptions): boolean
+  (command: 'track', eventName: string, attributes?: GioAttributes): boolean
+  (command: 'setUserId', userId: string, userKey?: string | null): boolean
+  (command: 'clearUserId'): boolean
+  (command: 'setUserAttributes', attributes: GioAttributes): boolean
+  (command: 'setOptions', options: GioMutableOptions): boolean
+  (command: 'setLocation', latitude: number, longitude: number): boolean
+  (command: 'clearLocation'): boolean
+}
 
 function record(value: unknown): Readonly<Record<string, unknown>> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -95,7 +122,7 @@ function registerGdpPlugins(value: unknown): boolean {
  * host and owns App/Page lifecycle forwarding itself. Application code has no tracker object;
  * all normal calls remain gdp commands.
  */
-export function gdp(command: unknown, ...args: readonly unknown[]): boolean {
+export const gdp: GdpCommand = (command: unknown, ...args: readonly unknown[]): boolean => {
   if (command === 'registerPlugins') return registerGdpPlugins(args[0])
   if (command === 'init') {
     if (gdpTracker !== null || typeof args[0] !== 'string' || typeof args[1] !== 'string') return false
@@ -143,4 +170,4 @@ declare global {
 
 export default gdp
 
-export type { GioInitOptions } from './core/config.js'
+export type { GioBuiltinPlugin } from './core/plugin-registry.js'

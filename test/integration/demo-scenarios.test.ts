@@ -111,7 +111,8 @@ describe('demo scenarios', () => {
       lifecycle.onShow.call(page, {})
 
       expect(gdp('track', 'blocked_before_consent')).toBe(false)
-      expect(gdp('setOptions', { dataCollect: 'true' })).toBe(false)
+      const untypedGdp = gdp as (command: unknown, ...args: readonly unknown[]) => boolean
+      expect(untypedGdp('setOptions', { dataCollect: 'true' })).toBe(false)
       expect(gdp('setOptions', { dataCollect: true })).toBe(true)
       const tracker = growingio as TrackerRuntime
       await tracker.whenReady()
@@ -122,7 +123,7 @@ describe('demo scenarios', () => {
       expect(gdp('track', 'demo_purchase_after_identity', { sku: 'demo-sku-002' })).toBe(true)
       expect(gdp('setLocation', 30.2741, 120.1551)).toBe(true)
       expect(gdp('clearLocation')).toBe(true)
-      expect(gdp('not_a_public_command')).toBe(false)
+      expect(untypedGdp('not_a_public_command')).toBe(false)
 
       expect(dispatchAutoTrack(
         { schemaVersion: 1, kind: 'click', xpath: '/button[1]', index: 1 },

@@ -219,18 +219,19 @@ type ResolvedGioConfig = Omit<Required<GioInitOptions>, 'appId' | 'appVersion' |
   sessionPolicy: SessionPolicy
 }
 
-export type TrackAttributeScalar = string | number | boolean | Date | null | undefined
-export type TrackAttributeValue = TrackAttributeScalar | TrackAttributeScalar[]
-export type TrackProperties = Record<string, TrackAttributeValue>
+export type GioAttributeScalar = string | number | boolean | Date | null | undefined
+export type GioAttributeValue = GioAttributeScalar | readonly GioAttributeScalar[]
+export type GioAttributes = Readonly<Record<string, GioAttributeValue>>
+export type GioMutableOptions = Readonly<{ dataCollect: boolean }>
 
 // SDK internal tracker: it is never exported to application code.
 interface InternalGioUniAppTracker {
   init(options: GioInitOptions): boolean
-  track(eventName: string, properties?: TrackProperties): boolean
+  track(eventName: string, properties?: GioAttributes): boolean
   setUserId(userId: string, userKey?: string | null): boolean
   clearUserId(): boolean
-  setUserAttributes(attributes: TrackProperties): boolean
-  setOptions(options: Pick<GioInitOptions, 'dataCollect'>): boolean
+  setUserAttributes(attributes: GioAttributes): boolean
+  setOptions(options: GioMutableOptions): boolean
   setLocation(latitude: number, longitude: number): boolean
   clearLocation(): boolean
   registerPlugins(...plugins: GioBuiltinPlugin[]): boolean
@@ -247,14 +248,29 @@ export type GioGdpInitOptions = Omit<GioInitOptions, 'accountId' | 'dataSourceId
   sdkVersion?: string
 }
 
+export type GioPluginRuntime = InternalGioUniAppTracker
+
 export type GioPlugin = {
   name: string
   // The only intentional internal-instance handoff: explicit customer plugins receive it here.
-  install(growingio: InternalGioUniAppTracker): void
+  install(growingio: GioPluginRuntime): void
 }
 
-export function gdp(command: 'registerPlugins', plugins: Array<GioBuiltinPlugin | GioPlugin>): boolean
-export function gdp(command: 'init', accountId: string, dataSourceId: string, options: GioGdpInitOptions): boolean
+export type GioPluginRegistration = GioBuiltinPlugin | GioPlugin
+
+export interface GdpCommand {
+  (command: 'registerPlugins', plugins: readonly GioPluginRegistration[]): boolean
+  (command: 'init', accountId: string, dataSourceId: string, options: GioGdpInitOptions): boolean
+  (command: 'track', eventName: string, attributes?: GioAttributes): boolean
+  (command: 'setUserId', userId: string, userKey?: string | null): boolean
+  (command: 'clearUserId'): boolean
+  (command: 'setUserAttributes', attributes: GioAttributes): boolean
+  (command: 'setOptions', options: GioMutableOptions): boolean
+  (command: 'setLocation', latitude: number, longitude: number): boolean
+  (command: 'clearLocation'): boolean
+}
+
+export const gdp: GdpCommand
 ```
 
 `gdp()` 与小程序 SDK 使用同一命令式接入形态：先注册插件，再初始化。业务侧只传账户、数据源、采集配置和 `createSSRApp(App)` 得到的 `uniVue`。SDK 自己读取全局 `uni`、创建内部 tracker 与全局 Vue mixin；业务 `App.vue` 和页面不必引入 bridge。`deviceId` 由 SDK 首次启动生成并以 SDK storage namespace 持久化；`sessionId` 也由 SDK 自己按首次访问、超时、用户切换和恢复采集等会话边界创建。宿主对象、device/session ID 工厂都是内部依赖，绝不要求客户传入。

@@ -68,6 +68,9 @@ const compiledTypes = readFileSync(resolve(compiledPackage, 'index.d.ts'), 'utf8
 if (!compiledTypes.includes('declare global') || !compiledTypes.includes('const gdp: GdpCommand')) {
   throw new Error('SDK root type entry must declare the global gdp command for application pages')
 }
+for (const declaration of ['interface GdpCommand', 'type GioGdpInitOptions', 'type GioUniVueApp', 'type GioAttributes', 'type GioPlugin']) {
+  if (!compiledTypes.includes(declaration)) throw new Error(`SDK root type entry is missing customer declaration: ${declaration}`)
+}
 
 const pages = readFileSync(resolve(root, 'demo/pages.json'), 'utf8')
 for (const route of ['custom-event', 'user', 'lifecycle', 'autotrack', 'route', 'datacollect', 'capabilities']) {

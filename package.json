@@ -13,7 +13,7 @@
     "test": "vitest run",
     "test:contract": "vitest run test/protocol-contract test/integration",
     "build:sdk": "tsc -p tsconfig.build.json && tsx scripts/prepare-sdk-dist.ts",
-    "demo:check": "pnpm run build:sdk && tsx scripts/check-demo.ts",
+    "demo:check": "pnpm run build:sdk && tsc --noEmit -p test/type/tsconfig.compiled-consumer.json && tsx scripts/check-demo.ts",
     "mock:collector": "tsx scripts/mock-collector.ts",
     "release:prepare": "tsx scripts/prepare-release.ts",
     "release:check": "tsx scripts/check-release.ts && tsc --noEmit -p release/uni_modules/gio-uniapp-autotracker/tsconfig.json"

@@ -31,6 +31,26 @@ export function createApp() {
 
 业务侧只通过 `gdp()` 调用 SDK，例如 `gdp('track', 'purchase', { sku: 'sku-1' })`。SDK 不向页面暴露 tracker 或 `$gio`；只有显式通过 `gdp('registerPlugins', [...])` 注册的客户插件会在 `install(growingio)` 中收到内部实例。自动页面/App 生命周期不再要求页面代码配合。
 
+## TypeScript 类型
+
+根入口会在客户项目中自动声明全局 `gdp`，无需额外的 `.d.ts` 文件；默认导入和全局调用具有同一组严格的命令重载。可从根入口按需导入 `GdpCommand`、`GioGdpInitOptions`、`GioUniVueApp`、`GioAttributes`、`GioPlugin` 和 `GioPluginRuntime` 等类型：
+
+```ts
+import gdp, { type GioAttributes, type GioGdpInitOptions } from 'gio-uniapp-autotracker'
+
+const options = {
+  uniVue: app,
+  dataCollect: false,
+  idMapping: true,
+} satisfies GioGdpInitOptions
+
+const attributes = { sku: 'sku-1', price: 99, tags: ['new', 'sale'] } satisfies GioAttributes
+gdp('init', 'account-id', 'data-source-id', options)
+gdp('track', 'purchase_completed', attributes)
+```
+
+支持的业务命令为 `track`、`setUserId`、`clearUserId`、`setUserAttributes`、`setOptions({ dataCollect })`、`setLocation` 和 `clearLocation`；`registerPlugins` 与 `init` 是入口命令。未知命令、错误参数个数、嵌套属性或非布尔 `dataCollect` 均会在 TypeScript 编译期报错。`GioPluginRuntime` 只会作为显式注册插件的 `install(growingio)` 参数出现，页面代码仍只能调用 `gdp()`。
+
 无埋点的模板插桩是一个构建期能力，因此 Vue 3/Vite 项目仍需在 `vite.config.ts` 增加一次插件（且必须排在 `uni()` 前）。这项配置不能放在运行时 `main.ts`，因为模板在应用代码执行前就已编译：
 
 ```ts
