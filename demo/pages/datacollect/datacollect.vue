@@ -6,6 +6,7 @@
       <switch :checked="collecting" data-title="采集开关" @change="toggle" />
       <button data-title="发送采集开关测试事件" @click="track">发送 datacollect_test_event</button>
       <button class="secondary" data-title="验证非法 setOptions 参数" @click="invalidOptions">验证非法参数</button>
+      <button class="secondary" data-title="验证多字段 setOptions 参数" @click="multipleOptions">验证多字段参数</button>
     </view>
     <view class="section"><text class="result">{{ result }}</text></view>
   </scroll-view>
@@ -23,6 +24,7 @@ export default {
     },
     track() { this.result = gdp('track', 'datacollect_test_event', { collecting: this.collecting }) ? '事件已入队。' : '事件未入队：采集关闭或 SDK 未就绪。' },
     invalidOptions() { this.result = gdp('setOptions', { dataCollect: 'yes' }) ? '异常：非法参数被接受。' : '非法参数已正确拒绝。' },
+    multipleOptions() { this.result = gdp('setOptions', { dataCollect: true, debug: true }) ? '异常：多字段配置被接受。' : '多字段配置已正确拒绝：运行时只允许 dataCollect。' },
   },
 }
 </script>

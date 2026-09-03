@@ -9,6 +9,7 @@
       <button data-title="发送边界属性事件" @click="trackBoundary">发送含边界属性的事件</button>
       <button data-title="设置用户属性" @click="setAttributes">设置用户属性</button>
       <button class="secondary" data-title="发送非法事件名" @click="trackInvalid">尝试非法事件名</button>
+      <button class="secondary" data-title="调用未知命令" @click="unknownCommand">尝试未知命令</button>
     </view>
     <view class="section">
       <text class="section-title">结果</text>
@@ -32,8 +33,12 @@ export default {
       this.showResult('product_exposure', ok)
     },
     trackBoundary() {
-      const ok = gdp('track', 'demo_attribute_boundary', { normal: 'kept', count: 3, nested: { discarded: true }, blank: '', nil: null })
-      this.showResult('demo_attribute_boundary', ok)
+      const ok = gdp('track', 'demo_attribute_boundary', {
+        kept: 'yes', labels: ['demo', true, 1], nested: { mustBeDiscarded: true }, nonFinite: Number.NaN,
+      })
+      this.result = ok
+        ? '事件已入队：collector 中应只保留 kept 和 labels，嵌套对象与 NaN 会被剔除。'
+        : '未入队：先开启采集开关。'
     },
     setAttributes() {
       const ok = gdp('setUserAttributes', { memberLevel: 'demo', campaign: 'uni-app-showcase' })
@@ -43,6 +48,7 @@ export default {
       const ok = gdp('track', '', { ignored: true })
       this.showResult('track(空事件名)', ok)
     },
+    unknownCommand() { this.showResult('未知 gdp 命令', gdp('not_a_public_command')) },
   },
 }
 </script>

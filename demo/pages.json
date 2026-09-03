@@ -31,10 +31,6 @@
       "style": { "navigationBarTitleText": "采集开关 / setOptions" }
     },
     {
-      "path": "pages/boundary/boundary",
-      "style": { "navigationBarTitleText": "命令边界 / 失败安全" }
-    },
-    {
       "path": "pages/capabilities/capabilities",
       "style": { "navigationBarTitleText": "能力边界" }
     }

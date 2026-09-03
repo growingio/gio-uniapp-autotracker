@@ -48,7 +48,7 @@ describe('demo scenarios', () => {
     expect(demoFile('main.ts')).toContain("import gdp from '@/uni_modules/gio-uniapp-autotracker/index.js'")
 
     const pages = JSON.parse(demoFile('pages.json')) as Readonly<{ pages: readonly { path: string }[]; tabBar: { list: readonly { pagePath: string }[] } }>
-    const expected = ['index', 'custom-event', 'user', 'lifecycle', 'autotrack', 'route', 'datacollect', 'boundary', 'capabilities']
+    const expected = ['index', 'custom-event', 'user', 'lifecycle', 'autotrack', 'route', 'datacollect', 'capabilities']
     expect(pages.pages.map((page) => page.path)).toStrictEqual(expected.map((name) => `pages/${name}/${name}`))
     expect(pages.tabBar.list.map((page) => page.pagePath)).toStrictEqual([
       'pages/index/index', 'pages/custom-event/custom-event', 'pages/user/user', 'pages/autotrack/autotrack',
@@ -56,11 +56,10 @@ describe('demo scenarios', () => {
 
     const commandExpectations: Readonly<Record<string, readonly string[]>> = {
       'pages/index/index.vue': ["gdp('track', 'home_quick_track'"],
-      'pages/custom-event/custom-event.vue': ["gdp('track', 'product_exposure'", "gdp('setUserAttributes'"],
-      'pages/user/user.vue': ["gdp('setUserId'", "gdp('clearUserId')", "gdp('setUserAttributes'"],
-      'pages/lifecycle/lifecycle.vue': ["gdp('track', 'lifecycle_demo_action'"],
+      'pages/custom-event/custom-event.vue': ["gdp('track', 'product_exposure'", "gdp('setUserAttributes'", "gdp('not_a_public_command')"],
+      'pages/user/user.vue': ["gdp('setUserId'", "gdp('clearUserId')", "gdp('setUserAttributes'", "gdp('setLocation'", "gdp('clearLocation'"],
+      'pages/lifecycle/lifecycle.vue': ["gdp('track', 'lifecycle_demo_action'", "gdp('registerPlugins'"],
       'pages/datacollect/datacollect.vue': ["gdp('setOptions'", "gdp('track', 'datacollect_test_event'"],
-      'pages/boundary/boundary.vue': ["gdp('registerPlugins'", "gdp('not_a_public_command')", "gdp('setOptions'", "gdp('setUserId'", "gdp('setLocation'", "gdp('track', 'boundary_attribute_filter'"],
     }
     for (const [path, commands] of Object.entries(commandExpectations)) {
       const source = demoFile(path)
@@ -128,7 +127,7 @@ describe('demo scenarios', () => {
       expect(gdp('setUserId', 'demo-user-001', 'email')).toBe(true)
       expect(gdp('setUserAttributes', { membership: 'demo', source: 'scenario' })).toBe(true)
       expect(gdp('track', 'demo_purchase_after_identity', { sku: 'demo-sku-002' })).toBe(true)
-      expect(untypedGdp('track', 'boundary_attribute_filter', {
+      expect(untypedGdp('track', 'demo_attribute_boundary', {
         kept: 'yes', labels: ['demo', true, 1], nested: { mustBeDiscarded: true }, nonFinite: Number.NaN,
       })).toBe(true)
       expect(gdp('setLocation', 30.2741, 120.1551)).toBe(true)
@@ -162,7 +161,7 @@ describe('demo scenarios', () => {
       expect(events.find((event) => event.eventName === 'demo_purchase_after_identity')).toMatchObject({
         attributes: { sku: 'demo-sku-002' }, userId: 'demo-user-001',
       })
-      expect(events.find((event) => event.eventName === 'boundary_attribute_filter')).toMatchObject({
+      expect(events.find((event) => event.eventName === 'demo_attribute_boundary')).toMatchObject({
         attributes: { kept: 'yes', labels: 'demo||true||1' },
       })
       const click = events.find((event) => event.eventType === 'VIEW_CLICK')

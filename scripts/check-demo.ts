@@ -14,7 +14,6 @@ const required = [
   'demo/pages/autotrack/autotrack.vue',
   'demo/pages/route/route.vue',
   'demo/pages/datacollect/datacollect.vue',
-  'demo/pages/boundary/boundary.vue',
   'demo/pages/capabilities/capabilities.vue',
 ]
 
@@ -74,7 +73,7 @@ for (const declaration of ['interface GdpCommand', 'type GioGdpInitOptions', 'ty
 }
 
 const pages = readFileSync(resolve(root, 'demo/pages.json'), 'utf8')
-for (const route of ['custom-event', 'user', 'lifecycle', 'autotrack', 'route', 'datacollect', 'boundary', 'capabilities']) {
+for (const route of ['custom-event', 'user', 'lifecycle', 'autotrack', 'route', 'datacollect', 'capabilities']) {
   if (!pages.includes(`pages/${route}/${route}`)) throw new Error(`pages.json is missing ${route}`)
 }
 

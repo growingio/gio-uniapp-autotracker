@@ -7,6 +7,7 @@
     <view class="section">
       <button data-title="发送生命周期示例事件" @click="trackAction">发送 lifecycle_demo_action</button>
       <button class="secondary" data-title="前往路由演示页" @click="goRoute">带参前往路由页</button>
+      <button class="secondary" data-title="初始化后重复注册插件" @click="registerAfterInit">验证初始化后重复注册插件</button>
       <text class="result">{{ result }}</text>
     </view>
     <view class="section"><text class="hint">APP_CLOSED 只能在真实 App 切到后台时触发；浏览器或静态检查不能替代这项验证。</text></view>
@@ -19,6 +20,7 @@ export default {
   methods: {
     trackAction() { this.result = gdp('track', 'lifecycle_demo_action', { page: 'lifecycle' }) ? '事件已入队。' : '未入队：先开启采集开关。' },
     goRoute() { uni.navigateTo({ url: `/pages/route/route?from=lifecycle&tick=${Date.now()}` }) },
+    registerAfterInit() { this.result = gdp('registerPlugins', [{ name: 'gioEventAutoTracking' }]) ? '异常：初始化后仍允许注册插件。' : '已正确拒绝：插件只能在首次 init 前注册。' },
   },
 }
 </script>
