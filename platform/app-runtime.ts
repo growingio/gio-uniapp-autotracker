@@ -37,9 +37,15 @@ function orientationReader(host: AppSystemApi): () => PageOrientation {
 /** Creates the App profile from the real `uni` surface without letting `uni` cross into core/runtime. */
 export function createAppTracker(host: AppRuntimeHost, options: AppRuntimeOptions): TrackerRuntime {
   const storage = new AppStoragePort(host)
+  const network = new AppNetworkPort(host)
   const tracker = new TrackerRuntime({
     storage,
-    systemContext: (config: ResolvedGioConfig) => new AppSystemContextPort(host, options.sdkVersion, config.appVersionFallback),
+    systemContext: (config: ResolvedGioConfig) => ({
+      load: async () => ({
+        ...(await new AppSystemContextPort(host, options.sdkVersion, config.appVersionFallback).load()),
+        networkState: await network.current(),
+      }),
+    }),
     clock: { now: () => Date.now() },
     timezone: { getOffsetMinutes: () => new Date().getTimezoneOffset() },
     deviceIdFactory: options.deviceIdFactory,
@@ -50,9 +56,9 @@ export function createAppTracker(host: AppRuntimeHost, options: AppRuntimeOption
       success: (message) => globalThis.console?.info(message),
       warn: (message) => globalThis.console?.warn(message),
       error: (message) => globalThis.console?.error(message),
-      debug: (message) => globalThis.console?.log(message),
+      debug: (message, data) => data === undefined ? globalThis.console?.log(message) : globalThis.console?.log(message, data),
     },
-    network: new AppNetworkPort(host),
+    network,
     upload: {
       transport: new AppRequestPort(host),
       runtime: {

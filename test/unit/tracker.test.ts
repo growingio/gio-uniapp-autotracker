@@ -45,10 +45,11 @@ function createTracker(dataCollect = true, autoTracking = false, debug = false, 
 describe('TrackerRuntime', () => {
   it('emits fixed lifecycle diagnostics and only emits event JSON when debug is enabled', async () => {
     const logs: string[] = []
+    const debugEventBatches: string[] = []
     const logger: LoggerPort = {
       info: (message) => logs.push(`info:${message}`), success: (message) => logs.push(`success:${message}`),
       warn: (message) => logs.push(`warn:${message}`), error: (message) => logs.push(`error:${message}`),
-      debug: (message) => logs.push(`debug:${message}`),
+      debug: (message, data) => { logs.push(`debug:${message}`); if (typeof data === 'string') debugEventBatches.push(data) },
     }
     const requests: string[] = []
     const transport: TransportPort = {
@@ -66,11 +67,37 @@ describe('TrackerRuntime', () => {
     expect(tracker.init({ accountId: 'account', dataSourceId: 'source', dataCollect: true, debug: true })).toBe(true)
     tracker.onAppShow({ path: '/home', query: '' })
     await tracker.whenReady()
-    expect(logs).toContain('info:[GrowingIO]: init accepted')
-    expect(logs).toContain('success:[GrowingIO]: initialized')
-    expect(logs).toContain('debug:[GrowingIO Debug]: action=app-show')
-    expect(logs.some((message) => message.includes('"eventType": "VISIT"'))).toBe(true)
+    expect(logs).toContain('info:[GrowingIO]：Gio uni-app SDK 初始化中...')
+    expect(logs).toContain('success:[GrowingIO]：Gio uni-app SDK 初始化完成！')
+    expect(logs).toContain('debug:App: onShow 100')
+    expect(debugEventBatches.map((batch) => JSON.parse(batch))).toEqual([expect.arrayContaining([expect.objectContaining({ eventType: 'VISIT' })])])
     expect(requests).toStrictEqual(['sent'])
+  })
+
+  it('logs App and Page lifecycle timestamps even while collection is disabled', async () => {
+    const logs: string[] = []
+    const logger: LoggerPort = {
+      info: (message) => logs.push(`info:${message}`), success: (message) => logs.push(`success:${message}`),
+      warn: (message) => logs.push(`warn:${message}`), error: (message) => logs.push(`error:${message}`),
+      debug: (message) => logs.push(`debug:${message}`),
+    }
+    const { tracker } = createTracker(false, false, true, logger)
+    tracker.onAppLaunch({ path: '/launch', query: '' })
+    tracker.onAppShow({ path: '/home', query: '' })
+    tracker.onPageLoad({ instanceId: 'home#1', route: 'pages/home/index', query: '', referralPage: null })
+    tracker.onPageShow('home#1', null)
+    tracker.onPageHide('home#1')
+    tracker.onPageUnload('home#1')
+    await tracker.whenReady()
+
+    expect(logs).toEqual(expect.arrayContaining([
+      'debug:App: onLaunch 100',
+      'debug:App: onShow 100',
+      'debug:Page: pages/home/index # onLoad 100',
+      'debug:Page: home#1 # onShow 100',
+      'debug:Page: home#1 # onHide 100',
+      'debug:Page: home#1 # onUnload 100',
+    ]))
   })
 
   it('buffers App onShow then business track through hydration and replays them in that lifecycle order', async () => {

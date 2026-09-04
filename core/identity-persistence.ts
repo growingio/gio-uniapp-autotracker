@@ -14,6 +14,11 @@ function generatedIdentity(factory: DeviceIdFactory): Identity {
   return { deviceId, userId: null, userKey: null }
 }
 
+/** IDs issued by the first App preview builds were not UUIDs and must not survive this migration. */
+function isLegacyAppGeneratedDeviceId(deviceId: string): boolean {
+  return /^device-[a-z0-9]+-[a-z0-9]+$/i.test(deviceId)
+}
+
 /** Restores one identity record and only ever deletes this SDK's namespace key. */
 export class IdentityPersistence {
   public constructor(
@@ -39,10 +44,9 @@ export class IdentityPersistence {
       return this.generateAndPersist('corrupt')
     }
     if (decoded.kind === 'legacy') {
-      await this.persist(decoded.identity)
-      return { identity: decoded.identity, source: 'legacy' }
+      return this.persistDecodedIdentity(decoded.identity, 'legacy')
     }
-    return { identity: decoded.identity, source: 'restored' }
+    return this.persistDecodedIdentity(decoded.identity, 'restored')
   }
 
   public persist(identity: Identity): Promise<StorageWrite> {
@@ -58,5 +62,20 @@ export class IdentityPersistence {
       // Storage failures are handled as unavailable on the next hydration attempt.
     }
     return { identity, source }
+  }
+
+  private async persistDecodedIdentity(identity: Identity, source: 'legacy' | 'restored'): Promise<IdentityHydration> {
+    if (!isLegacyAppGeneratedDeviceId(identity.deviceId)) {
+      if (source === 'legacy') await this.persist(identity)
+      return { identity, source }
+    }
+
+    const migrated: Identity = { ...identity, deviceId: generatedIdentity(this.deviceIdFactory).deviceId }
+    try {
+      await this.persist(migrated)
+    } catch {
+      // The UUID is still used for this process; storage failures are handled on next hydration.
+    }
+    return { identity: migrated, source: 'generated' }
   }
 }

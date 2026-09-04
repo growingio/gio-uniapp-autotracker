@@ -168,7 +168,10 @@ describe('demo scenarios', () => {
       })
       const click = events.find((event) => event.eventType === 'VIEW_CLICK')
       expect(click).toMatchObject({ xpath: '/button[1]', textValue: '普通无埋点按钮', index: 1 })
-      expect(click).toMatchObject({ deviceId: expect.stringMatching(/^device-/), sessionId: expect.stringMatching(/^session-/) })
+      expect(click).toMatchObject({
+        deviceId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
+        sessionId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
+      })
       expect(events.some((event) => Object.values(event).includes('must-not-leak'))).toBe(false)
     } finally {
       if (originalUni === undefined) delete (globalThis as Record<string, unknown>).uni

@@ -26,4 +26,17 @@ describe('AppNetworkPort', () => {
     expect(received).toStrictEqual(['4G', 'UNKNOWN'])
     expect(host.listener).toBeNull()
   })
+
+  it('uses an explicit plus.networkinfo reading when uni.getNetworkType fails', async () => {
+    const scope = globalThis as Record<string, unknown>
+    const original = scope.plus
+    scope.plus = { networkinfo: { CONNECTION_WIFI: 3, getCurrentType: () => 3 } }
+    try {
+      const port = new AppNetworkPort({ getNetworkType: (options) => { options.fail() } })
+      await expect(port.current()).resolves.toBe('WIFI')
+    } finally {
+      if (original === undefined) delete scope.plus
+      else scope.plus = original
+    }
+  })
 })

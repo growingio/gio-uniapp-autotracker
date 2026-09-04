@@ -3,6 +3,7 @@ import type { GioInitOptions } from './core/config.js'
 import type { GioBuiltinPlugin } from './core/plugin-registry.js'
 import { TrackerRuntime } from './runtime/tracker.js'
 import { installUniAppLifecycle, type UniAppVueApp } from './runtime/uniapp-installer.js'
+import { guid } from './core/guid.js'
 
 let singleton: TrackerRuntime | null = null
 let gdpTracker: TrackerRuntime | null = null
@@ -77,10 +78,6 @@ function appHost(): AppRuntimeHost | null {
     : null
 }
 
-function generatedId(prefix: string): string {
-  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
-}
-
 function isUniVueApp(value: unknown): value is UniAppVueApp {
   const candidate = record(value)
   return candidate !== null && typeof candidate.mixin === 'function'
@@ -132,8 +129,8 @@ export const gdp: GdpCommand = (command: unknown, ...args: readonly unknown[]): 
     const { uniVue, sdkVersion, ...init } = input
     const tracker = createGioTracker(host, {
       sdkVersion: typeof sdkVersion === 'string' && sdkVersion.trim() !== '' ? sdkVersion : '0.1.0',
-      deviceIdFactory: () => generatedId('device'),
-      sessionIdFactory: () => generatedId('session'),
+      deviceIdFactory: guid,
+      sessionIdFactory: guid,
     })
     const builtinPlugins = pendingGdpPlugins.filter(isBuiltinPlugin)
     if (!tracker.registerPlugins(...builtinPlugins) || !tracker.init({ ...init, accountId: args[0], dataSourceId: args[1] })) return false

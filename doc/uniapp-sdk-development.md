@@ -453,8 +453,8 @@ export function createApp() {
 
 | uni-app 时机 | SDK 操作 | 必须避免 |
 |---|---|---|
-| `App.vue:onLaunch` | 记录启动参数快照、初始化系统上下文；不发重复 VISIT | 读取尚未稳定的页面实例 |
-| `App.vue:onShow` | 计算新/续 session；必要时发 `VISIT`；恢复网络监听 | 页面事件替代 App 事件 |
+| `App.vue:onLaunch` | 标记新的 App JS 运行期并记录启动参数快照；不直接发事件 | 读取尚未稳定的页面实例 |
+| `App.vue:onShow` | 新运行期强制创建 session 并发 `VISIT`；无新 `onLaunch` 时才按后台超时续接 | 页面事件替代 App 事件 |
 | `Page:onLoad` | 复制 query 并绑定到页面实例/唯一 page key | 以后从可变页面对象回读 query |
 | `Page:onShow` | 解析 route/title/referral，记录 pageShowTimestamp；自动发 `PAGE` | 全局 50ms 去重误吞不同页面 |
 | `Page:onHide` | 标记页面非当前；不发 `APP_CLOSED` | 认为页面隐藏就是应用进入后台 |
@@ -465,12 +465,12 @@ export function createApp() {
 
 一期 App 的“新访问”只在以下情况发生：
 
-1. 首次启动，尚无 `lastCloseTime`；
-2. 从后台返回，距上次 `onHide` 超过当前 profile 的固定时长；
+1. 每次 `App:onLaunch` 标识出的新 App JS 运行期（包括用户杀进程后重启）；
+2. 同一运行期从后台返回，距上次 `onHide` 超过当前 profile 的固定时长；
 3. 已登录用户从 A 切换为不同的已登录用户 B；
 4. `dataCollect` 从 `false` 恢复为 `true`。
 
-session core 只比较 `lastCloseTime` 与当前时间，不读取平台名称；profile 提供默认值，`init({ sessionExpires })` 可统一覆盖。该字段与 Web SDK 同名、同为分钟单位：App（Android/iOS/HarmonyOS）默认 **0.5 分钟（30 秒）**，Web profile 默认 **30 分钟**，小程序 profile 默认 **5 分钟**。一期仅交付 App profile；其余两项是未来 profile 的已定默认值，不属于 App 的降级或兼容分支。Android/iOS/HarmonyOS 独立 SDK 虽使用秒单位的 `sessionInterval`，但传统 uni-app 在对外 API 边界统一采用 Web 的 `sessionExpires`，随后一次换算为 core 毫秒策略。未来小程序若要兼容既有 `keepAlive`（分钟）入口，只能在小程序 profile 的接入边界映射为统一的 `sessionExpires`，不得把别名带进 core。为让 `0.5` 能在全端表达，Web profile 接入时必须保留正的小数分钟值，不能沿用现有 Web 实现“取整且最小 1 分钟”的旧 normalizer。App 不沿用小程序“场景值变化即新访问”的规则。使用默认 App 值时，30 秒内从不同 Deep Link、分享或入口 query 回到 App 不新建 session、不补 `VISIT`；后续页面只按自身 `onLoad` 的 query 建快照。
+`App:onLaunch` 是 App 冷启动边界：它出现时即使持久化的 `lastCloseTime` 距今不足 30 秒，也必须替换 session 并在紧随的 `onShow` 发 `VISIT`。只有没有新的 `onLaunch` 的后台恢复才比较 `lastCloseTime` 与当前时间。profile 提供默认值，`init({ sessionExpires })` 可统一覆盖。该字段与 Web SDK 同名、同为分钟单位：App（Android/iOS/HarmonyOS）默认 **0.5 分钟（30 秒）**，Web profile 默认 **30 分钟**，小程序 profile 默认 **5 分钟**。一期仅交付 App profile；其余两项是未来 profile 的已定默认值，不属于 App 的降级或兼容分支。Android/iOS/HarmonyOS 独立 SDK 虽使用秒单位的 `sessionInterval`，但传统 uni-app 在对外 API 边界统一采用 Web 的 `sessionExpires`，随后一次换算为 core 毫秒策略。未来小程序若要兼容既有 `keepAlive`（分钟）入口，只能在小程序 profile 的接入边界映射为统一的 `sessionExpires`，不得把别名带进 core。为让 `0.5` 能在全端表达，Web profile 接入时必须保留正的小数分钟值，不能沿用现有 Web 实现“取整且最小 1 分钟”的旧 normalizer。App 不沿用小程序“场景值变化即新访问”的规则。使用默认 App 值时，30 秒内从不同 Deep Link、分享或入口 query 回到 App 不新建 session、不补 `VISIT`；后续页面只按自身 `onLoad` 的 query 建快照。
 
 ```ts
 const appSessionPolicy: SessionPolicy = { timeoutMs: 30 * 1000 }
@@ -1117,8 +1117,8 @@ type Capability = {
 
 日志分两类，口径对齐小程序 SDK：
 
-1. 无论 `debug` 是否开启，参数错误、未初始化调用、配置/插件警告、初始化开始/完成和请求失败均通过统一 `consoleText(message, level)` 输出；level 只允许 `info`、`success`、`warn`、`error`，前缀固定为小程序同款 `[GrowingIO]：`。这是给接入方定位错误的提示，不输出 SDK 内部对象。
-2. `debug: true` 时额外输出热路径：App 生命周期、Page 生命周期、无埋点 action，以及每批发送前的完整待发事件数组。事件数组必须是已执行 Protocol 字段裁剪和 `sanitizeOutboundEvent`、且移除 SDK 内部 `requestId` / `trackingId` 后的 JSON；格式固定为 `console.log('[GrowingIO Debug]:', JSON.stringify(events, null, 2))`。这与小程序 uploader 的调试输出一致。
+1. 无论 `debug` 是否开启，参数错误、未初始化调用、配置/插件警告、初始化开始/完成和请求失败均通过统一 `consoleText(message, level)` 输出；level 只允许 `info`、`success`、`warn`、`error`，前缀固定为 `[GrowingIO]：`。初始化开始/完成的文本明确标识当前产品，依次为 `Gio uni-app SDK 初始化中...`、`Gio uni-app SDK 初始化完成！`；配置失败、运行期初始化失败和重复初始化分别输出对应的中文受控诊断，不输出 SDK 内部对象或状态码。
+2. `debug: true` 时额外输出热路径：App 生命周期格式为 `App: <lifecycle> <timestamp>`，Page 生命周期格式为 `Page: <route> # <lifecycle> <timestamp>`，与小程序 SDK 一致；无埋点 action 也会输出。事件只在 uploader 准备实际发送请求时打印完整待发数组，绝不在入队时打印。事件数组必须是已执行 Protocol 字段裁剪和 `sanitizeOutboundEvent`、且移除 SDK 内部 `requestId` / `trackingId` 后的 JSON；格式固定为 `console.log('[GrowingIO Debug]:', JSON.stringify(events))`，使 iOS 调试基座也完整显示数组的方括号和对象花括号。
 
 `debug` 只改变本地控制台输出，不改变事件、队列、重试、请求或隐私规则；它不支持 `setOptions()` 热修改。由于调试事件数组会包含协议中本来就允许上报的字段（例如 userId、query 或业务显式允许采集的值），接入方不得在生产环境开启，也不得把控制台内容转存或上传为诊断数据。password、验证码、证件、支付、文件等被事件构建拒绝的敏感值，不得因为 debug 出现在日志中。
 

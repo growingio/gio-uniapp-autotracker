@@ -39,6 +39,18 @@ describe('IdentityPersistence', () => {
     expect(backend.writes[0]).not.toContain('"visitor"')
   })
 
+  it('replaces the legacy App preview device id with the UUID factory result', async () => {
+    const value = serializeIdentityRecord({ deviceId: 'device-mtlcgvmp-jg42ca8ji3b', userId: 'A', userKey: null }, 'source')
+    const backend = port({ kind: 'value', value })
+    const persistence = new IdentityPersistence(backend.port, 'gio:v1:source:identity', 'source', () => '021b4e17-8361-4a46-b8ab-ea970a108e70')
+
+    await expect(persistence.hydrate()).resolves.toStrictEqual({
+      identity: { deviceId: '021b4e17-8361-4a46-b8ab-ea970a108e70', userId: 'A', userKey: null },
+      source: 'generated',
+    })
+    expect(backend.writes).toHaveLength(1)
+  })
+
   it('generates on a missing record and removes only the identity key after corruption', async () => {
     const missing = port({ kind: 'missing' })
     await expect(new IdentityPersistence(missing.port, 'gio:v1:source:identity', 'source', () => 'generated').hydrate()).resolves.toStrictEqual({

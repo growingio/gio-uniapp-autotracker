@@ -77,12 +77,17 @@ export class TrackerRuntime {
   }
 
   public init(options: unknown): boolean {
+    this.log('info', '[GrowingIO]：Gio uni-app SDK 初始化中...')
     const result = this.lifecycle.init(options as GioInitOptions)
     if (!result.ok) {
-      this.log('warn', `[GrowingIO]: init failed (${result.code})`)
+      this.log(
+        result.code === 'already_initialized' ? 'warn' : 'error',
+        result.code === 'already_initialized'
+          ? '[GrowingIO]：SDK重复初始化，请检查是否重复加载SDK或接入其他平台SDK导致冲突!'
+          : '[GrowingIO]：SDK初始化失败，初始化参数不合法!',
+      )
       return false
     }
-    this.log('info', '[GrowingIO]: init accepted')
     this.hydration = this.hydrate(result.config)
     return true
   }
@@ -217,7 +222,7 @@ export class TrackerRuntime {
     })
     if (!hydrated.ok) {
       this.bootstrapFailed = true
-      this.log('error', '[GrowingIO]: initialization failed')
+      this.log('error', '[GrowingIO]：SDK初始化失败!')
       return
     }
 
@@ -261,7 +266,7 @@ export class TrackerRuntime {
       identity, identityPersistence, sessionPersistence, metaPersistence, queuePersistence, queue, sequence, sessions, location,
       app: appWithFlush, page, dispatcher, uploader, stopNetwork,
     }
-    this.log('success', '[GrowingIO]: initialized')
+    this.log('success', '[GrowingIO]：Gio uni-app SDK 初始化完成！')
     this.gate.release((intent) => this.emit(intent))
     if (this.pendingCollectionResume) {
       this.pendingCollectionResume = false
@@ -289,20 +294,21 @@ export class TrackerRuntime {
     const payload = record(intent.payload)
     if (payload === null) return false
     let emitted = false
+    let lifecycleHandled = false
     switch (intent.kind) {
       case 'track': emitted = state.dispatcher.track({ eventName: payload.eventName, properties: payload.properties }); break
       case 'autotrack': emitted = state.dispatcher.autoTrack(payload as AutoTrackCall); break
-      case 'app-launch': state.app.onLaunch(payload as AppEntrySnapshot); emitted = true; break
-      case 'app-show': emitted = state.app.onShow(payload as AppEntrySnapshot).visitQueued; break
-      case 'app-hide': emitted = state.app.onHide().appClosedQueued; break
-      case 'page-load': emitted = state.page.onLoad(payload as PageLoadInput) !== null; break
+      case 'app-launch': state.app.onLaunch(payload as AppEntrySnapshot); emitted = true; lifecycleHandled = true; break
+      case 'app-show': emitted = state.app.onShow(payload as AppEntrySnapshot).visitQueued; lifecycleHandled = true; break
+      case 'app-hide': emitted = state.app.onHide().appClosedQueued; lifecycleHandled = true; break
+      case 'page-load': emitted = state.page.onLoad(payload as PageLoadInput) !== null; lifecycleHandled = true; break
       case 'page-show': emitted = typeof payload.instanceId === 'string' && (typeof payload.title === 'string' || payload.title === null)
-        ? state.page.onShow(payload.instanceId, payload.title).pageQueued : false; break
-      case 'page-hide': if (typeof payload.instanceId === 'string') { state.page.onHide(payload.instanceId); emitted = true }; break
-      case 'page-unload': if (typeof payload.instanceId === 'string') { state.page.onUnload(payload.instanceId); emitted = true }; break
+        ? state.page.onShow(payload.instanceId, payload.title).pageQueued : false; lifecycleHandled = typeof payload.instanceId === 'string' && (typeof payload.title === 'string' || payload.title === null); break
+      case 'page-hide': if (typeof payload.instanceId === 'string') { state.page.onHide(payload.instanceId); emitted = true; lifecycleHandled = true }; break
+      case 'page-unload': if (typeof payload.instanceId === 'string') { state.page.onUnload(payload.instanceId); emitted = true; lifecycleHandled = true }; break
       default: return false
     }
-    if (emitted) this.debugAction(intent.kind)
+    if (emitted || lifecycleHandled) this.debugAction(intent.kind, payload)
     this.persistAfterEvent()
     return emitted
   }
@@ -333,18 +339,29 @@ export class TrackerRuntime {
     state.uploader?.flush()
   }
 
-  private debugAction(kind: string): void {
+  /** Matches the mini-program SDK's lifecycle diagnostics while keeping event JSON at send time. */
+  private debugAction(kind: string, payload: Readonly<Record<string, unknown>>): void {
     if (this.lifecycle.config()?.debug !== true) return
-    this.log('debug', `[GrowingIO Debug]: action=${kind}`)
+    const timestamp = this.dependencies.clock.now()
+    switch (kind) {
+      case 'app-launch': this.log('debug', `App: onLaunch ${timestamp}`); return
+      case 'app-show': this.log('debug', `App: onShow ${timestamp}`); return
+      case 'app-hide': this.log('debug', `App: onHide ${timestamp}`); return
+      case 'page-load': this.log('debug', `Page: ${typeof payload.route === 'string' ? payload.route : ''} # onLoad ${timestamp}`); return
+      case 'page-show': this.log('debug', `Page: ${typeof payload.instanceId === 'string' ? payload.instanceId : ''} # onShow ${timestamp}`); return
+      case 'page-hide': this.log('debug', `Page: ${typeof payload.instanceId === 'string' ? payload.instanceId : ''} # onHide ${timestamp}`); return
+      case 'page-unload': this.log('debug', `Page: ${typeof payload.instanceId === 'string' ? payload.instanceId : ''} # onUnload ${timestamp}`); return
+      default: this.log('debug', `[GrowingIO Debug]: action=${kind}`)
+    }
   }
 
-  /** Only the uploader knows a batch will actually be dispatched, so its observer owns event JSON logs. */
+  /** Only the uploader knows a batch will actually be dispatched, so it logs the event-object array. */
   private debugEvents(events: readonly ProtocolEvent[]): void {
     if (this.lifecycle.config()?.debug !== true) return
     try {
-      this.log('debug', `[GrowingIO Debug]: ${JSON.stringify(events, null, 2)}`)
+      this.dependencies.logger?.debug('[GrowingIO Debug]:', JSON.stringify(events))
     } catch {
-      this.log('debug', '[GrowingIO Debug]: []')
+      // Diagnostics must never alter collection.
     }
   }
 

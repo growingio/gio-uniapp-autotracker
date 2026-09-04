@@ -20,7 +20,7 @@ const system: AppSystemContext = {
   deviceType: 'PHONE', appVersion: '1.0.0', language: 'en-US', sdkVersion: '0.1.0',
 }
 
-function createLifecycle(initialCollection = true) {
+function createLifecycle(initialCollection = true, initialSession: Readonly<{ sessionId: string; lastCloseTime: number | null }> | null = null) {
   let now = 0
   let collect = initialCollection
   let persisted = 0
@@ -28,7 +28,7 @@ function createLifecycle(initialCollection = true) {
   const sessions = new SessionManager(config.sessionPolicy, (() => {
     let index = 0
     return () => `session-${++index}`
-  })())
+  })(), initialSession)
   const queue = new EventQueue()
   const pages = new PageStore()
   const lifecycle = new AppLifecycle({
@@ -80,6 +80,17 @@ describe('AppLifecycle', () => {
     expect(queue.snapshot().map((entry) => entry.event.eventType)).toStrictEqual(['VISIT', 'APP_CLOSED'])
     expect(queue.snapshot()[1]?.event).toMatchObject({ appState: 'BACKGROUND', path: 'pages/home/index', query: 'tab=feed' })
     expect(calls()).toStrictEqual({ persisted: 3, flushed: 1 })
+  })
+
+  it('starts a new session and sends VISIT after a cold process launch, even within the background timeout', () => {
+    const { lifecycle, queue } = createLifecycle(true, { sessionId: 'persisted-session', lastCloseTime: 10 })
+    lifecycle.onLaunch({ path: '/launch', query: 'source=restart' })
+
+    expect(lifecycle.onShow({ path: '/home', query: '' })).toMatchObject({
+      session: { startedNew: true, reason: 'cold_start', snapshot: { sessionId: 'session-1', lastCloseTime: null } },
+      visitQueued: true,
+    })
+    expect(queue.snapshot()).toMatchObject([{ event: { eventType: 'VISIT', sessionId: 'session-1', path: '/home' } }])
   })
 
   it('starts a new session and VISIT strictly after the 30 second default timeout', () => {

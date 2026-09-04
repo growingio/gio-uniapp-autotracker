@@ -22,4 +22,23 @@ describe('createAppTracker', () => {
     expect(tracker.queuedEvents()).toStrictEqual([])
     expect(dispatchAutoTrack({ schemaVersion: 1, kind: 'click', xpath: '/x' })).toBe(false)
   })
+
+  it('waits for the initial network read before composing the first VISIT', async () => {
+    const payloads: string[] = []
+    const tracker = createAppTracker({
+      getStorageSync: () => undefined, setStorageSync: () => undefined, removeStorageSync: () => undefined,
+      getDeviceInfo: () => ({ platform: 'harmonyos', deviceBrand: 'huawei', deviceModel: 'BRA-AL00' }),
+      getSystemInfoSync: () => ({ deviceOrientation: 'portrait', windowWidth: 390, windowHeight: 844 }),
+      getAppBaseInfo: () => ({ bundleName: 'com.example.harmony' }),
+      getNetworkType: (options) => { options.success({ networkType: 'wifi' }) },
+      request: (options) => { payloads.push(options.data); options.success({ statusCode: 204 }) },
+    }, { sdkVersion: '0.1.0', deviceIdFactory: () => 'device-1', sessionIdFactory: () => 'session-1' })
+
+    expect(tracker.init({ accountId: 'account', dataSourceId: 'source' })).toBe(true)
+    tracker.onAppShow({ path: '/home', query: '' })
+    await tracker.whenReady()
+    expect(JSON.parse(payloads[0] ?? '')[0]).toMatchObject({
+      eventType: 'VISIT', networkState: 'WIFI', deviceBrand: 'huawei', deviceModel: 'BRA-AL00',
+    })
+  })
 })

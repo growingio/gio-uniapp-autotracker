@@ -15,6 +15,20 @@ describe('SessionManager', () => {
     expect(session.resume(2)).toMatchObject({ startedNew: false, reason: null, snapshot: { sessionId: 'first', lastCloseTime: null } })
   })
 
+  it('replaces a persisted session when a new App process launches', () => {
+    const session = new SessionManager(
+      { timeoutMs: 30_000 },
+      ids('fresh'),
+      { sessionId: 'persisted', lastCloseTime: 100 },
+    )
+
+    expect(session.onProcessLaunch()).toMatchObject({
+      startedNew: true,
+      reason: 'cold_start',
+      snapshot: { sessionId: 'fresh', lastCloseTime: null },
+    })
+  })
+
   it('records App.onHide and resumes the same session through the exact timeout boundary', () => {
     const session = new SessionManager({ timeoutMs: 30_000 }, ids('first', 'second'))
     session.resume(1)

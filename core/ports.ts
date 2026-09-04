@@ -30,13 +30,13 @@ export interface TimezonePort {
   getOffsetMinutes(): number
 }
 
-/** Core reports only fixed diagnostic strings and already-sanitized event JSON through this port. */
+/** Core reports fixed diagnostics and dispatched event JSON through this port. */
 export interface LoggerPort {
   info(message: string): void
   success(message: string): void
   warn(message: string): void
   error(message: string): void
-  debug(message: string): void
+  debug(message: string, data?: unknown): void
 }
 
 /** Network state is best effort. UNKNOWN includes offline and must never block queueing. */
