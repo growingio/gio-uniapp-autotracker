@@ -21,8 +21,8 @@ for (const file of required) {
 }
 
 const main = readFileSync(resolve(root, 'demo/main.ts'), 'utf8')
-if (!main.includes("@/uni_modules/gio-uniapp-autotracker/index.js") || !main.includes("gdp('registerPlugins'") || !main.includes("gdp('init', 'demo-account', 'demo-source'") || !main.includes('uniVue: app') || !main.includes('dataCollect: false')) {
-  throw new Error('demo main.ts must use the gdp command entry, register autotracking, and start with collection disabled')
+if (!main.includes("@/uni_modules/gio-uniapp-autotracker/index.js") || !main.includes("gdp('registerPlugins'") || !main.includes("gdp('init', 'demo-account', 'demo-source'") || !main.includes('uniVue: app') || main.includes('dataCollect: false')) {
+  throw new Error('demo main.ts must use the gdp command entry, register autotracking, and start with collection enabled')
 }
 if (main.includes('deviceIdFactory') || main.includes('sessionIdFactory') || main.includes('createGioTracker')) {
   throw new Error('demo main.ts must not provide SDK-owned device, session, or host runtime internals')
@@ -48,11 +48,11 @@ for (const file of ['demo/main.ts', 'demo/vite.config.ts']) {
 
 const vite = readFileSync(resolve(root, 'demo/vite.config.ts'), 'utf8')
 const autoTrack = vite.indexOf('gioUniappAutoTrack')
-const uni = vite.lastIndexOf('uni()')
+const uni = vite.lastIndexOf('uniPlugin()')
 if (autoTrack < 0 || uni < 0 || autoTrack > uni || !vite.includes("runtimeImport: '@/uni_modules/gio-uniapp-autotracker/autotrack.js'")) {
   throw new Error('demo Vite auto-track plugin must be configured before uni() with the compiled dispatcher import')
 }
-if (!vite.includes("@/uni_modules/gio-uniapp-autotracker/vite.js")) {
+if (!vite.includes("./uni_modules/gio-uniapp-autotracker/vite.js")) {
   throw new Error('demo Vite config must import the compiled SDK package')
 }
 

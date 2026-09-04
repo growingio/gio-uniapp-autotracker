@@ -6,7 +6,7 @@
     </view>
     <view class="section">
       <text class="section-title">开始前</text>
-      <text class="hint">默认 dataCollect=false，不会采集或发送数据。先启动 mock collector，并在「采集开关」页显式开启；真机须把 main.ts 中的 127.0.0.1 改为开发机局域网 IP。</text>
+      <text class="hint">默认已开启 dataCollect：App:onShow 会创建 VISIT，并在 uploader 真正发送前输出 Debug JSON。需要等待隐私同意时，再在 main.ts 显式设为 false 并通过「采集开关」页开启。</text>
     </view>
     <view class="section">
       <text class="section-title">功能演示</text>

@@ -8,9 +8,6 @@ export function createApp() {
   gdp('registerPlugins', [{ name: 'gioEventAutoTracking' }])
   gdp('init', 'demo-account', 'demo-source', {
     uniVue: app,
-    // On a physical device replace 127.0.0.1 with the development machine's LAN address.
-    serverUrl: 'http://127.0.0.1:3100',
-    dataCollect: false,
     idMapping: true,
     debug: true,
   })

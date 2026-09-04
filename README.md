@@ -71,7 +71,7 @@ export default {
 
 ## Showcase demo
 
-先运行 `pnpm build:sdk`，它将编译产物写入 `demo/uni_modules/gio-uniapp-autotracker`。然后可用 HBuilderX 打开 [demo](./demo) 目录；demo 只引用这份编译产物，不跨目录引用 SDK 源码。它以默认不采集的方式演示生命周期、`track`、身份和用户属性、路由上下文、Vue 3 无埋点及 `dataCollect` 动态开关；ABTest 和微信分享会明确显示为当前未实现，而非模拟接口结果。详见 [demo/README.md](./demo/README.md)。
+先运行 `pnpm build:sdk`，它将编译产物写入 `demo/uni_modules/gio-uniapp-autotracker`。然后可用 HBuilderX 打开 [demo](./demo) 目录；demo 只引用这份编译产物，不跨目录引用 SDK 源码。它默认采集，以便启动后验证 `VISIT`、生命周期、`track`、身份和用户属性、路由上下文、Vue 3 无埋点及 `dataCollect` 动态开关；如需隐私同意流程，可在 `main.ts` 显式关闭后通过示例页恢复采集。ABTest 和微信分享会明确显示为当前未实现，而非模拟接口结果。详见 [demo/README.md](./demo/README.md)。
 
 ## 发布目录
 
