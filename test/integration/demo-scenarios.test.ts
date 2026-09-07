@@ -1,3 +1,4 @@
+import { testAutoTrackProfile } from '../support/autotrack-fixture.js'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
@@ -7,6 +8,7 @@ import { transformAutoTrackSfc } from '../../autotrack/vite.js'
 import type { AppRuntimeHost } from '../../platform/app-runtime.js'
 import type { ProtocolEvent } from '../../core/protocol.js'
 import type { TrackerRuntime } from '../../runtime/tracker.js'
+import { mountAutoTrackSfc } from '../support/autotrack-fixture.js'
 
 type LifecycleHooks = Readonly<{
   onLaunch: (this: Record<string, unknown>, options: unknown) => void
@@ -78,15 +80,36 @@ describe('demo scenarios', () => {
 
     expect(transformed.changed).toBe(true)
     expect(transformed.code).toContain(`from "${runtimeImport}"`)
-    expect(transformed.code).toContain('ignored:true')
+    expect(transformed.code).toContain('ignored:&quot;&quot;')
     expect(transformed.code).toContain('sensitive:true')
-    expect(transformed.code).toContain('trackValue:true')
-    expect(transformed.code).toContain("onAction('普通点击')")
+    expect(transformed.code).toContain('trackValue:&quot;&quot;')
+    expect(transformed.code).toContain("onAction(&#39;普通点击&#39;)")
     expect(transformed.code).toContain('onInputComplete($event)')
+    expect(transformed.code).toContain('eventName:&quot;openURL&quot;')
+    expect(transformed.warnings).toStrictEqual([])
+    for (const marker of ['currentTarget 无 id', 'v-if 用例', 'v-show 用例', 'data-growing-sensitive', '<uni-link']) {
+      expect(source).toContain(marker)
+    }
+  })
+
+  it.each([
+    ['script setup', 'components/auto-track-script-setup/auto-track-script-setup.vue', 'script-setup-action#submit'],
+    ['setup alias', 'components/auto-track-setup-alias/auto-track-setup-alias.vue', 'setup-alias-action#submit'],
+  ])('keeps the actual %s demo handler single-shot', async (_name, path, xpath) => {
+    const probes: unknown[][] = []
+    const fixture = mountAutoTrackSfc(demoFile(path), (...args) => { probes.push(args); return true })
+    expect(fixture.elements().map((element) => element.text).join('')).toContain('业务执行次数：0')
+    fixture.fire(0, 'onTap', { currentTarget: { id: xpath.slice(0, xpath.indexOf('#')), dataset: {} } })
+    await Promise.resolve()
+    expect(probes).toHaveLength(1)
+    expect(probes[0]?.[0]).toMatchObject({ eventName: 'submit' })
+    expect(fixture.elements().map((element) => element.text).join('')).toContain('业务执行次数：1')
+    fixture.unmount()
   })
 
   it('runs the gdp-only lifecycle, consent, identity, custom-event, and autotrack journey', async () => {
     vi.resetModules()
+    vi.doMock('../../platform/capabilities.js', () => ({ appCapabilityProfile: () => testAutoTrackProfile }))
     const originalUni = (globalThis as Record<string, unknown>).uni
     const originalGdp = (globalThis as Record<string, unknown>).gdp
     let hooks: LifecycleHooks | null = null
@@ -137,15 +160,15 @@ describe('demo scenarios', () => {
       expect(untypedGdp('not_a_public_command')).toBe(false)
 
       expect(dispatchAutoTrack(
-        { schemaVersion: 1, kind: 'click', xpath: '/button[1]', index: 1 },
+        { schemaVersion: 2, source: 'template', kind: 'click', eventName: 'onAction', index: 1 },
         { currentTarget: { type: 'button', dataset: { title: '普通无埋点按钮', index: '1', src: '/pages/autotrack/autotrack?case=plain' } } },
       )).toBe(true)
       expect(dispatchAutoTrack(
-        { schemaVersion: 1, kind: 'click', xpath: '/button[2]', ignored: true },
+        { schemaVersion: 2, source: 'template', kind: 'click', eventName: 'onAction', ignored: true },
         { currentTarget: { type: 'button', dataset: { title: '必须忽略的按钮' } } },
       )).toBe(false)
       expect(dispatchAutoTrack(
-        { schemaVersion: 1, kind: 'change', xpath: '/input[2]', trackValue: true },
+        { schemaVersion: 2, source: 'template', kind: 'change', eventName: 'onInputComplete', elementType: 'input', trackValue: true },
         { currentTarget: { type: 'password', dataset: { title: '密码', growingTrack: true } }, detail: { value: 'must-not-leak' } },
       )).toBe(false)
       lifecycle.onHide.call({})
@@ -167,13 +190,14 @@ describe('demo scenarios', () => {
         attributes: { kept: 'yes', labels: 'demo||true||1' },
       })
       const click = events.find((event) => event.eventType === 'VIEW_CLICK')
-      expect(click).toMatchObject({ xpath: '/button[1]', textValue: '普通无埋点按钮', index: 1 })
+      expect(click).toMatchObject({ xpath: '#onAction', textValue: '普通无埋点按钮', index: 1 })
       expect(click).toMatchObject({
         deviceId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
         sessionId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
       })
       expect(events.some((event) => Object.values(event).includes('must-not-leak'))).toBe(false)
     } finally {
+      vi.doUnmock('../../platform/capabilities.js')
       if (originalUni === undefined) delete (globalThis as Record<string, unknown>).uni
       else (globalThis as Record<string, unknown>).uni = originalUni
       if (originalGdp === undefined) delete (globalThis as Record<string, unknown>).gdp

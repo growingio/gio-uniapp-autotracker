@@ -49,7 +49,7 @@ describe('installUniAppLifecycle', () => {
       ['app-show', { path: 'pages/index/index', query: null }],
       ['page-load', { instanceId: 'pages/order/detail-1', route: 'pages/order/detail', query: 'orderId=42', referralPage: null }],
       ['page-show', { id: 'pages/order/detail-1', title: '订单详情' }],
-      ['autotrack', { schemaVersion: 1, kind: 'click', xpath: '/tabBar[2]', index: 1, textValue: '订单' }],
+      ['autotrack', { schemaVersion: 2, source: 'tabbar', kind: 'click', xpath: '#onTabItemTap', index: 2, textValue: '订单' }],
       ['page-hide', 'pages/order/detail-1'],
       ['page-unload', 'pages/order/detail-1'],
       ['app-hide', null],

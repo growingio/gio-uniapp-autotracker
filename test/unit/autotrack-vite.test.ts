@@ -1,116 +1,177 @@
-import { describe, expect, it } from 'vitest'
-import { compile } from '@vue/compiler-dom'
-
+import { describe, expect, it, vi } from 'vitest'
+import { nextTick } from 'vue'
+import { NodeTypes, parse } from '@vue/compiler-dom'
 import { gioUniappAutoTrack, transformAutoTrackSfc, transformAutoTrackTemplate } from '../../autotrack/vite.js'
+import { mountAutoTrackSfc } from '../support/autotrack-fixture.js'
 
-describe('transformAutoTrackTemplate', () => {
-  it('uses Vue AST locations to prefix a static click handler while retaining its original expression', () => {
-    const result = transformAutoTrackTemplate('<view @click="submit(item)">Buy</view><input @change="change" />')
-    expect(result.changed).toBe(true)
-    expect(result.code).toContain('__gioAutoTrack({schemaVersion:1,kind:`click`,xpath:`/view[1]`},$event);submit(item)')
-    expect(result.code).toContain('__gioAutoTrack({schemaVersion:1,kind:`change`,xpath:`/input[1]`},$event);change($event)')
+function handlers(code: string): string[] {
+  const result: string[] = []
+  const visit = (children: ReturnType<typeof parse>['children']): void => {
+    for (const child of children) if (child.type === NodeTypes.ELEMENT) {
+      for (const prop of child.props) if (prop.type === NodeTypes.DIRECTIVE && prop.name === 'on' && prop.exp?.type === NodeTypes.SIMPLE_EXPRESSION) result.push(prop.exp.content)
+      visit(child.children)
+    }
+  }
+  visit(parse(code).children)
+  return result
+}
+const source = (template: string, script = 'export default { methods: { save(e) { return e }, cancel(e) { return e } } }') => `<template>${template}</template><script>${script}</script>`
+
+describe('schema v2 Vue instrumentation', () => {
+  it.each([
+    ['save', 'save'], ['save($event)', 'save'], ['actions.save', 'actions.save'], ['actions.save($event)', 'actions.save'],
+    ['(event) => save(event)', 'save'], ['function(event) { return save(event) }', 'save'], ['() => 42', 'click'], ['count++', 'click'],
+  ])('derives the readable name for %s and preserves return values and native arguments', (handler, eventName) => {
+    const calls = vi.fn()
+    const fixture = mountAutoTrackSfc(source(`<button @click="${handler}" />`, `export default { data() { return { count: 0, actions: { save: e => e } } }, methods: { save(e) { return e } } }`), calls)
+    const event = { value: 'native' }
+    const returned = fixture.fire(0, 'onClick', event)
+    expect(calls).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ schemaVersion: 2, source: 'template', kind: 'click', eventName }), event)
+    expect(returned).toBe(handler === 'count++' ? 0 : handler === '() => 42' ? 42 : event)
+    expect(calls.mock.calls[0]?.[0]).not.toHaveProperty('xpath')
+    fixture.unmount()
+  })
+  it('preserves handler call count, receiver, return and throw after the probe', () => {
+    const sequence: string[] = []
+    const business = { save: vi.fn(function(this: unknown, event: unknown) { sequence.push('business'); expect(this).toBe(business); return event }) }
+    const fixture = mountAutoTrackSfc('<script setup>import { business } from "fixture"</script><template><button @tap="business.save($event)" /></template>', () => sequence.push('probe'), { fixture: { business } })
+    const event = {}
+    expect(fixture.fire(0, 'onTap', event)).toBe(event)
+    expect(sequence).toEqual(['probe', 'business'])
+    expect(business.save).toHaveBeenCalledTimes(1)
+    const error = new Error('business error')
+    business.save.mockImplementation(() => { throw error })
+    expect(() => fixture.fire(0, 'onTap', event)).toThrow(error)
+    expect(business.save).toHaveBeenCalledTimes(2)
+    fixture.unmount()
+  })
+  it.each(['ready() ? save : cancel', 'ready() ? save($event) : cancel($event)', 'ready() ? e => save(e) : e => cancel(e)'])('chooses one branch and evaluates its condition once: %s', (handler) => {
+    const ready = vi.fn().mockReturnValueOnce(true).mockReturnValueOnce(false)
+    const save = vi.fn((e) => e)
+    const cancel = vi.fn((e) => e)
+    const dispatch = vi.fn()
+    const fixture = mountAutoTrackSfc(`<script setup>import { ready, save, cancel } from 'fixture'</script><template><button @click="${handler}" /></template>`, dispatch, { fixture: { ready, save, cancel } })
+    const first = {}, second = {}
+    expect(fixture.fire(0, 'onClick', first)).toBe(first)
+    expect(fixture.fire(0, 'onClick', second)).toBe(second)
+    expect(ready).toHaveBeenCalledTimes(2)
+    expect(save).toHaveBeenCalledExactlyOnceWith(first)
+    expect(cancel).toHaveBeenCalledExactlyOnceWith(second)
+    expect(dispatch.mock.calls.map((args) => args[0].eventName)).toEqual(['save', 'cancel'])
+    fixture.unmount()
+  })
+  it.each([
+    '<script setup>const submit = e => e</script>',
+    '<script>export default { setup() { const saveOrder = e => e; return { submit: saveOrder } } }</script>',
+    '<script lang="ts">export default { methods: { submit(e: unknown) { return e } } }</script>',
+  ])('compiles and executes the template-visible binding in each SFC script form', (script) => {
+    const dispatch = vi.fn()
+    const fixture = mountAutoTrackSfc(`${script}<template><button id="buy" @click="submit" /></template>`, dispatch)
+    const event = {}
+    expect(fixture.fire(0, 'onClick', event)).toBe(event)
+    expect(dispatch.mock.calls[0]?.[0].eventName).toBe('submit')
+    fixture.unmount()
+  })
+  it('preserves a reactive object returned directly from an ordinary setup', async () => {
+    const fixture = mountAutoTrackSfc(`<script>
+      import { reactive } from 'vue'
+      export default { setup() { const state = reactive({ count: 0, increment: () => 0 }); state.increment = () => ++state.count; return state } }
+      </script><template><text>{{ count }}</text><button @click="increment" /></template>`, () => true)
+    expect(fixture.fire(0, 'onClick', {})).toBe(1)
+    await nextTick()
+    expect(fixture.elements().find((element) => element.type === 'text')?.text).toBe('1')
+    expect(fixture.fire(0, 'onClick', {})).toBe(2)
+    await nextTick()
+    expect(fixture.elements().find((element) => element.type === 'text')?.text).toBe('2')
+    fixture.unmount()
   })
 
-  it('does not rewrite dynamic, modifier, or missing handler directives', () => {
-    const source = '<view v-on:[event]="go" @click.stop="go" @change></view>'
-    const result = transformAutoTrackTemplate(source)
-    expect(result).toMatchObject({ code: source, changed: false })
-    expect(result.warnings.map((warning) => warning.code)).toStrictEqual(['dynamic_event', 'event_modifiers', 'missing_handler'])
+  it('processes nested template and slot declarations, dynamic branches and v-for instances', async () => {
+    const dispatch = vi.fn()
+    const fixture = mountAutoTrackSfc(`<script setup>
+      import { ref } from 'vue'
+      const show = ref(true); const items = ref([{ id:'sku-1', title:'one' }, { id:'sku-2', title:'two' }]);
+      const save = item => item.id; defineExpose({ show, items })
+      </script><template><template v-if="show"><template v-for="(item, i) in items" :key="item.id"><button :id="item.id" :data-title="item.title" :data-index="i + 1" @click="save(item)" /></template></template><button v-show="show" @tap="save({ id:'tail' })" /></template>`, dispatch)
+    expect(fixture.fire(0, 'onClick', {})).toBe('sku-1')
+    expect(fixture.fire(1, 'onClick', {})).toBe('sku-2')
+    expect(dispatch.mock.calls.map((args) => args[0])).toMatchObject([{ eventName: 'save', textValue: 'one', index: 1 }, { eventName: 'save', textValue: 'two', index: 2 }])
+    expect(dispatch.mock.calls.every((args) => !('id' in args[0]) && !('xpath' in args[0]))).toBe(true)
+    ;(fixture.instance as unknown as { show: boolean }).show = false
+    await nextTick()
+    expect(fixture.elements().filter((element) => typeof element.props.onClick === 'function')).toHaveLength(0)
+    expect(dispatch).toHaveBeenCalledTimes(2)
+    fixture.unmount()
+    const slot = transformAutoTrackSfc(source('<card><template #default="slot"><button @tap="save(slot)" /></template></card>'))
+    expect(slot.changed).toBe(true)
+    expect(slot.warnings).toEqual([])
   })
-
-  it('keeps custom components and unsupported component events unchanged with explicit warnings', () => {
-    const source = '<business-card @click="open" /><view @change="change" /><button @tap="tap" />'
-    const result = transformAutoTrackTemplate(source)
-    expect(result.code).toContain('<business-card @click="open" />')
-    expect(result.code).toContain('<view @change="change" />')
-    expect(result.code).toContain('__gioAutoTrack({schemaVersion:1,kind:`click`,xpath:`/button[1]`},$event);tap($event)')
-    expect(result.warnings.map((warning) => warning.code)).toStrictEqual(['custom_component', 'unsupported_event'])
+  it('handles alias collisions and does not mistake strings or comments for SDK imports', () => {
+    const sfc = `<script setup>const gioAutoTrack = 1; const gioAutoTrack1Listener = 2; const str = 'dispatchAutoTrack as gioAutoTrack'; const save = e => e</script><template><button @click="save" /></template>`
+    const first = transformAutoTrackSfc(sfc, '@sdk/runtime')
+    expect(first.code).toContain('dispatchAutoTrack as gioAutoTrack2')
+    const second = transformAutoTrackSfc(first.code, '@sdk/runtime')
+    expect(second.code).toBe(first.code)
+    expect(second.changed).toBe(false)
+    const added = transformAutoTrackSfc(first.code.replace('</template>', '<button @tap="save" /></template>'), '@sdk/runtime')
+    expect(added.changed).toBe(true)
+    expect(added.code.match(/dispatchAutoTrack as /g)).toHaveLength(2)
   })
-
-  it('wraps listener-valued arrow and conditional expressions without swallowing their return path', () => {
-    const result = transformAutoTrackTemplate('<view @click="() => save()" /><view @click="ready ? save : cancel" />')
-    expect(result.code).toContain('($event)=>{__gioAutoTrack({schemaVersion:1,kind:`click`,xpath:`/view[1]`},$event);return (() => save())($event)}')
-    expect(result.code).toContain('($event)=>{__gioAutoTrack({schemaVersion:1,kind:`click`,xpath:`/view[2]`},$event);return (ready ? save : cancel)($event)}')
-    expect(compile(result.code, { mode: 'module' }).code).toContain('return (() => _ctx.save())($event)')
+  it.each(['handlers[key]', 'handlers[key]()', 'ready ? (other ? save : cancel) : save', 'save(); cancel()', 'items.map(item => save(item))', '() => { save(); cancel() }', 'async e => save(e)'])('leaves ambiguous expressions untouched: %s', (handler) => {
+    const template = `<button @click="${handler}" />`
+    expect(transformAutoTrackTemplate(template)).toMatchObject({ code: template, changed: false, warnings: [{ code: 'complex_handler' }] })
   })
-
-  it('keeps complex inline expressions unchanged when they cannot be safely classified', () => {
-    const source = '<view @click="items.map(item => select(item))" />'
-    const result = transformAutoTrackTemplate(source)
-    expect(result).toMatchObject({ code: source, changed: false })
-    expect(result.warnings.map((warning) => warning.code)).toStrictEqual(['complex_handler'])
+  it('warns for dynamic events, custom components, modifiers, missing and unsupported events', () => {
+    const template = '<button v-on:[name]="save"/><component :is="which" @click="save"/><button @click.stop="save"/><button @tap/><input @input="save"/>'
+    expect(transformAutoTrackTemplate(template)).toMatchObject({ code: template, changed: false })
+    expect(transformAutoTrackTemplate(template).warnings.map((warning) => warning.code)).toEqual(['dynamic_event', 'custom_component', 'event_modifiers', 'missing_handler', 'unsupported_event'])
   })
-
-  it('forwards only static privacy-safe metadata and marks sensitive controls', () => {
-    const result = transformAutoTrackTemplate('<input type="password" data-growing-track data-title="secret" @change="save"><view data-growing-ignore data-index="0" data-src="/detail" @click="go" /></input>')
-    expect(result.code).toContain('__gioAutoTrack({schemaVersion:1,kind:`change`,xpath:`/input[1]`,trackValue:true,sensitive:true,textValue:`secret`},$event);save($event)')
-    expect(result.code).toContain('__gioAutoTrack({schemaVersion:1,kind:`click`,xpath:`/view[1]`,ignored:true,index:0,hyperlink:`/detail`},$event);go($event)')
+  it('selects change before blur before confirm while preserving unselected listeners', () => {
+    const transformed = transformAutoTrackTemplate('<input @blur="blur" @confirm="confirm" @change="change"/><textarea @confirm="finish"/>')
+    const listeners = handlers(transformed.code)
+    expect(listeners[0]).toBe('blur')
+    expect(listeners[1]).toBe('confirm')
+    expect(listeners[2]).toContain('eventName:"change"')
+    expect(listeners[3]).toContain('eventName:"finish"')
+    const unsupported = transformAutoTrackTemplate('<input @change.stop="change" @blur="blur"/>')
+    expect(unsupported.changed).toBe(false)
   })
-
-  it('uses one deterministic input completion callback and supports a standalone confirm handler', () => {
-    const deduped = transformAutoTrackTemplate('<input @change="change" @blur="blur" @confirm="confirm" />')
-    expect(deduped.code).toContain('@change="__gioAutoTrack({schemaVersion:1,kind:`change`,xpath:`/input[1]`},$event);change($event)"')
-    expect(deduped.code).toContain('@blur="blur"')
-    expect(deduped.code).toContain('@confirm="confirm"')
-
-    const confirmOnly = transformAutoTrackTemplate('<textarea @confirm="confirm" />')
-    expect(confirmOnly.code).toContain('@confirm="__gioAutoTrack({schemaVersion:1,kind:`change`,xpath:`/textarea[1]`},$event);confirm($event)"')
+  it('passes dynamic and static privacy markers and conservatively marks bound type and password inputs', () => {
+    for (const attr of ['type="password"', 'type="safe-password"', 'type="file"', ':type="type"', 'password', ':password="password"']) {
+      expect(handlers(transformAutoTrackTemplate(`<input ${attr} data-growing-track @blur="save"/>`).code)[0]).toContain('sensitive:true')
+    }
+    expect(handlers(transformAutoTrackTemplate('<button data-growing-ignore="false" :data-growing-sensitive="privateValue" @click="save"/>').code)[0]).toContain('ignored:"false"')
   })
-
-  it('adds a click-only probe for uni-link without a business handler', () => {
-    const result = transformAutoTrackTemplate('<uni-link data-title="Docs" />')
-    expect(result.code).toContain('<uni-link data-title="Docs"  @click="__gioAutoTrack({schemaVersion:1,kind:`click`,xpath:`/uni-link[1]`,textValue:`Docs`},$event)"/>')
-    expect(compile(result.code, { mode: 'module' }).code).toContain('onClick')
+  it('creates openURL probes with static and dynamic href and preserves a business click name', () => {
+    const values = handlers(transformAutoTrackTemplate('<uni-link href="/docs"/><uni-link :href="link"/><uni-link href="/docs" @click="save"/>').code)
+    expect(values[0]).toContain('eventName:"openURL"')
+    expect(values[0]).toContain('hyperlink:"/docs"')
+    expect(values[1]).toContain('hyperlink:(link)')
+    expect(values[2]).toContain('eventName:"save"')
   })
-
-  it('adds a setup block for an Options API SFC, so transformed template handlers can resolve the dispatcher', () => {
-    const source = '<template><view @click="go">Go</view></template><script>export default {}</script>'
-    const transformed = transformAutoTrackSfc(source, '@sdk/runtime')
-    expect(transformed.changed).toBe(true)
-    expect(transformed.code).toContain('<script setup>\nimport { dispatchAutoTrack as __gioAutoTrack } from "@sdk/runtime"\n</script>\n<template>')
-    expect(transformed.code).toContain('<script>export default {}</script>')
-    expect(transformed.code).toContain('__gioAutoTrack({schemaVersion:1,kind:`click`,xpath:`/view[1]`},$event);go($event)')
-    expect(transformAutoTrackSfc(transformed.code, '@sdk/runtime').code.match(/dispatchAutoTrack as __gioAutoTrack/g)).toHaveLength(1)
+  it('passes picker range and derives fixed picker-view column ranges', () => {
+    const values = handlers(transformAutoTrackTemplate('<picker :range="items" range-key="name" @change="save"/><picker-view @change="save"><picker-view-column><view v-for="item in first">{{item}}</view></picker-view-column><picker-view-column><view>A</view><view>B</view></picker-view-column></picker-view> ').code)
+    expect(values[0]).toContain('pickerRange:(items),pickerRangeKey:"name"')
+    expect(values[1]).toContain('pickerRange:[(first),["A","B"]]')
   })
-
-  it('keeps the dispatcher import inside an existing setup script', () => {
-    const source = '<template><view @click="go">Go</view></template><script setup>const go = () => undefined</script>'
-    const transformed = transformAutoTrackSfc(source, '@sdk/runtime')
-    expect(transformed.code).toContain('<script setup>\nimport { dispatchAutoTrack as __gioAutoTrack } from "@sdk/runtime"\nconst go')
+  it('keeps quote and entity contents intact in generated attributes', () => {
+    const dispatch = vi.fn()
+    const fixture = mountAutoTrackSfc(source('<button data-title="A &quot; B &amp; C" @click="save($event)"/>'), dispatch)
+    fixture.fire(0, 'onClick', {})
+    expect(dispatch.mock.calls[0]?.[0].textValue).toBe('A " B & C')
+    fixture.unmount()
   })
-
-  it('keeps the rewritten event handler compilable as a Vue template expression', () => {
-    const transformed = transformAutoTrackTemplate('<view data-title="Buy" @click="submit(item)">Buy</view>')
-    const compiled = compile(transformed.code, { mode: 'module' })
-    expect(compiled.code).toContain('export function render')
-    expect(compiled.code).toContain('_ctx.__gioAutoTrack({schemaVersion:1,kind:`click`,xpath:`/view[1]`,textValue:`Buy`},$event);_ctx.submit(_ctx.item)')
-  })
-
-  it('continues to invoke a bare method reference with the native event', () => {
-    const transformed = transformAutoTrackTemplate('<view @click="go">Go</view>')
-    const compiled = compile(transformed.code, { mode: 'module' })
-    expect(compiled.code).toContain('_ctx.__gioAutoTrack({schemaVersion:1,kind:`click`,xpath:`/view[1]`},$event);_ctx.go($event)')
-  })
-
-  it('exposes a pre Vite plugin and ignores non-Vue input', () => {
-    const plugin = gioUniappAutoTrack('@sdk/runtime')
-    expect(plugin).toMatchObject({ name: 'gio-uniapp-autotrack', enforce: 'pre' })
-    expect(plugin.transform('const a = 1', 'entry.ts')).toBeNull()
-  })
-
-  it('supports the documented options form and can disable transformation', () => {
-    const disabled = gioUniappAutoTrack({ enabled: false })
-    expect(disabled.transform('<template><view @click="go" /></template>', 'page.vue')).toBeNull()
-    const defaultPlugin = gioUniappAutoTrack()
-    expect(defaultPlugin.transform('<template><view @click="go" /></template>', 'page.vue')?.code).toContain('from "gio-uniapp-autotracker/autotrack"')
-    const configured = gioUniappAutoTrack({ runtimeImport: '@sdk/runtime' })
-    expect(configured.transform('<template><view @click="go" /></template>', 'page.vue')?.code).toContain('from "@sdk/runtime"')
-  })
-
-  it('does not instrument nvue templates and emits an explicit build warning', () => {
-    const plugin = gioUniappAutoTrack()
+  it('reports parser failures and forwards all warnings with file and source offset', () => {
+    expect(transformAutoTrackTemplate('<view><button></view>').warnings[0]?.code).toBe('template_parse_error')
+    expect(transformAutoTrackSfc('<template><view></template>').warnings[0]?.code).toBe('sfc_parse_error')
     const warnings: string[] = []
-    expect(plugin.transform.call({ warn: (message: string) => warnings.push(message) }, '<view @click="go" />', 'page.nvue')).toBeNull()
-    expect(warnings).toStrictEqual(['[gio-uniapp-autotrack] .nvue is not instrumented in 1.0: page.nvue'])
+    const plugin = gioUniappAutoTrack()
+    expect(plugin).toMatchObject({ name: 'gio-uniapp-autotrack', enforce: 'pre' })
+    expect(plugin.transform.call({ warn: (warning) => warnings.push(warning) }, source('<button @click.stop="save"/>'), 'page.vue')).toBeNull()
+    expect(warnings[0]).toMatch(/page.vue:\d+ event_modifiers/)
+    plugin.transform.call({ warn: (warning) => warnings.push(warning) }, '<view/>', 'page.nvue')
+    expect(warnings[1]).toContain('page.nvue:0 .nvue_not_instrumented')
+    expect(plugin.transform('const a = 1', 'entry.tsx')).toBeNull()
+    expect(gioUniappAutoTrack({ enabled: false }).transform(source('<button @tap="save"/>'), 'page.vue')).toBeNull()
   })
 })

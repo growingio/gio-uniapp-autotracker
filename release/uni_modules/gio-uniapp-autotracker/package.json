@@ -8,7 +8,9 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@vue/compiler-dom": "^3.5.13"
+    "@babel/parser": "^7.29.8",
+    "@vue/compiler-dom": "3.4.21",
+    "@vue/compiler-sfc": "3.4.21"
   },
   "exports": {
     ".": "./index.ts",

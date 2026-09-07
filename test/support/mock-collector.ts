@@ -22,6 +22,8 @@ export type MockCollectorOptions = Readonly<{
   port?: number
   host?: string
   acceptedStatus?: 200 | 204
+  /** 只供合成数据链路测试断言；默认仍仅保存脱敏请求摘要。 */
+  onAcceptedEvents?: (events: readonly Readonly<Record<string, unknown>>[]) => void
 }>
 
 function writeJson(response: ServerResponse, status: number, body?: Record<string, unknown>): void {
@@ -100,6 +102,7 @@ export async function createMockCollector(options: MockCollectorOptions = {}): P
       return
     }
 
+    options.onAcceptedEvents?.(events)
     requests.push({
       ...detail,
       eventCount: events.length,

@@ -37,10 +37,12 @@ describe('createPageLifecycleBridge', () => {
       onPageLoad: () => true, onPageShow: () => true, onPageHide: () => true, onPageUnload: () => true,
       autoTrack: (call) => { calls.push(call); return true },
     }, 'home#1')
-    expect(bridge.onTabItemTap({ index: 0, text: 'Home', extra: { unsafe: true } })).toBe(true)
-    expect(bridge.onTabItemTap({ index: -1 })).toBe(false)
+    expect(bridge.onTabItemTap({ index: 0, text: 'Home', pagePath: 'pages/home/index', extra: { unsafe: true } })).toBe(true)
+    for (const index of [-1, 1.5, NaN, Infinity, 2147483646, '0', {}]) expect(bridge.onTabItemTap({ index })).toBe(false)
+    expect(bridge.onTabItemTap({ index: 0, pagePath: {} })).toBe(false)
+    expect(bridge.onTabItemTap({ get index() { throw new Error('host') } })).toBe(false)
     expect(calls).toStrictEqual([
-      { schemaVersion: 1, kind: 'click', xpath: '/tabBar[1]', index: 0, textValue: 'Home' },
+      { schemaVersion: 2, source: 'tabbar', kind: 'click', xpath: '#onTabItemTap', index: 1, textValue: 'Home', hyperlink: 'pages/home/index' },
     ])
   })
 })

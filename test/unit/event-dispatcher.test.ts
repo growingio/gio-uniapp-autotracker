@@ -68,29 +68,16 @@ describe('EventDispatcher', () => {
     expect(sequence.current()).toStrictEqual({ eventSequenceId: 0 })
   })
 
-  it('builds VIEW events only from a constrained call and the current shown page', () => {
+  it('builds VIEW events from normalized calls and excludes click-only fields from change', () => {
     const { dispatcher, queue } = createDispatcher()
-    expect(dispatcher.autoTrack({ schemaVersion: 1, kind: 'click', xpath: '/view[1]', textValue: 'Buy', index: 0, hyperlink: '/buy' })).toBe(true)
-    expect(dispatcher.autoTrack({ schemaVersion: 1, kind: 'change', xpath: '/input[1]', index: 3, hyperlink: '/ignored' })).toBe(true)
-
+    expect(dispatcher.autoTrack({ kind: 'click', xpath: 'buy#save', textValue: 'Buy', index: 1, hyperlink: '/buy' })).toBe(true)
+    expect(dispatcher.autoTrack({ kind: 'change', xpath: '#search', textValue: 'false' })).toBe(true)
     expect(queue.snapshot().map((entry) => entry.event)).toMatchObject([
-      { eventType: 'VIEW_CLICK', eventSequenceId: 1, path: 'pages/detail/index', pageShowTimestamp: 99, xpath: '/view[1]', index: 0, hyperlink: '/buy' },
-      { eventType: 'VIEW_CHANGE', eventSequenceId: 2, xpath: '/input[1]' },
+      { eventType: 'VIEW_CLICK', eventSequenceId: 1, path: 'pages/detail/index', pageShowTimestamp: 99, xpath: 'buy#save', index: 1, hyperlink: '/buy' },
+      { eventType: 'VIEW_CHANGE', eventSequenceId: 2, xpath: '#search', textValue: 'false' },
     ])
     expect(queue.snapshot()[1]?.event).not.toHaveProperty('index')
     expect(queue.snapshot()[1]?.event).not.toHaveProperty('hyperlink')
-  })
-
-  it('rejects ignored or sensitive probes and treats change values as opt-in', () => {
-    const { dispatcher, queue } = createDispatcher()
-    expect(dispatcher.autoTrack({ schemaVersion: 1, kind: 'click', xpath: '/view[1]', ignored: true })).toBe(false)
-    expect(dispatcher.autoTrack({ schemaVersion: 1, kind: 'change', xpath: '/input[1]', sensitive: true, trackValue: true, textValue: 'secret' })).toBe(false)
-    expect(dispatcher.autoTrack({ schemaVersion: 1, kind: 'change', xpath: '/input[2]', textValue: 'not opted in' })).toBe(true)
-    expect(dispatcher.autoTrack({ schemaVersion: 1, kind: 'change', xpath: '/input[3]', trackValue: true, textValue: 'accepted' })).toBe(true)
-    expect(queue.snapshot().map((entry) => entry.event)).toMatchObject([
-      { eventType: 'VIEW_CHANGE', xpath: '/input[2]' },
-      { eventType: 'VIEW_CHANGE', xpath: '/input[3]', textValue: 'accepted' },
-    ])
-    expect(queue.snapshot()[0]?.event).not.toHaveProperty('textValue')
+    expect(queue.snapshot()[1]?.event).not.toHaveProperty('eventName')
   })
 })

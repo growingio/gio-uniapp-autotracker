@@ -1090,7 +1090,7 @@ type Capability = {
 日志分两类，口径对齐小程序 SDK：
 
 1. 无论 `debug` 是否开启，参数错误、未初始化调用、配置/插件警告、初始化开始/完成和请求失败均通过统一 `consoleText(message, level)` 输出；level 只允许 `info`、`success`、`warn`、`error`，前缀固定为 `[GrowingIO]：`。初始化开始/完成的文本明确标识当前产品，依次为 `Gio uni-app SDK 初始化中...`、`Gio uni-app SDK 初始化完成！`；配置失败、运行期初始化失败和重复初始化分别输出对应的中文受控诊断，不输出 SDK 内部对象或状态码。
-2. `debug: true` 时额外输出热路径：App 生命周期格式为 `App: <lifecycle> <timestamp>`，Page 生命周期格式为 `Page: <route> # <lifecycle> <timestamp>`，与小程序 SDK 一致；无埋点 action 也会输出。事件只在 uploader 准备实际发送请求时打印完整待发数组，绝不在入队时打印。事件数组必须是已执行 Protocol 字段裁剪和 `sanitizeOutboundEvent`、且移除 SDK 内部 `requestId` / `trackingId` 后的 JSON；格式固定为 `console.log('[GrowingIO Debug]:', JSON.stringify(events))`，使 iOS 调试基座也完整显示数组的方括号和对象花括号。
+2. `debug: true` 时额外输出热路径：App 生命周期格式为 `App: <lifecycle> <timestamp>`，Page 生命周期格式为 `Page: <route> # <lifecycle> <timestamp>`，与小程序 SDK 一致；无埋点 action 也会输出。事件只在 uploader 准备实际发送请求时打印完整待发数组，绝不在入队时打印。事件数组必须是已执行 Protocol 字段裁剪和 `sanitizeOutboundEvent`、且移除 SDK 内部 `requestId` / `trackingId` 后的 JSON；格式固定为单参数 ``console.log(`[GrowingIO Debug]: ${JSON.stringify(events)}`)``，避免 App 调试基座丢弃第二个参数。
 
 `debug` 只改变本地控制台输出，不改变事件、队列、重试、请求或隐私规则；它不支持 `setOptions()` 热修改。由于调试事件数组会包含协议中本来就允许上报的字段（例如 userId、query 或业务显式允许采集的值），接入方不得在生产环境开启，也不得把控制台内容转存或上传为诊断数据。password、验证码、证件、支付、文件等被事件构建拒绝的敏感值，不得因为 debug 出现在日志中。
 

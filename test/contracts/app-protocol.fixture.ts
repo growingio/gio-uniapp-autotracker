@@ -155,7 +155,7 @@ export const APP_EVENT_FIXTURES: Readonly<Record<AppEventType, AppEventFixture>>
     eventType: 'VIEW_CLICK',
     eventSequenceId: 4,
     pageShowTimestamp: 1_700_000_000_000,
-    xpath: 'pages/index/index#tap#fixture-button',
+    xpath: 'fixture-button#tap',
     index: 0,
   },
   VIEW_CHANGE: {
@@ -163,7 +163,7 @@ export const APP_EVENT_FIXTURES: Readonly<Record<AppEventType, AppEventFixture>>
     eventType: 'VIEW_CHANGE',
     eventSequenceId: 5,
     pageShowTimestamp: 1_700_000_000_000,
-    xpath: 'pages/index/index#change#fixture-switch',
+    xpath: 'fixture-switch#change',
     textValue: 'false',
   },
 }

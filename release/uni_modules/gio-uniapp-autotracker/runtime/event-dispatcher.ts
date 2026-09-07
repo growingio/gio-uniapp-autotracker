@@ -1,7 +1,7 @@
 import { EventComposer } from '../core/event-composer.js'
 import { normalizeAttributes } from '../core/protocol.js'
 import type { PageSnapshot } from '../core/page-store.js'
-import { normalizeAutoTrackCall, type AutoTrackCall } from '../autotrack/contract.js'
+import type { NormalizedAutoTrackCall } from '../autotrack/contract.js'
 
 export type TrackIntent = Readonly<{
   eventName: unknown
@@ -44,10 +44,9 @@ export class EventDispatcher {
   }
 
   /** VIEW events are valid only with a current shown page; no host component object reaches composer. */
-  public autoTrack(call: AutoTrackCall): boolean {
-    const normalized = normalizeAutoTrackCall(call)
+  public autoTrack(normalized: NormalizedAutoTrackCall): boolean {
     const page = this.currentPage()
-    if (normalized === null || normalized.ignored || normalized.sensitive || page === null || page.shownAt === null) return false
+    if (page === null || page.shownAt === null) return false
     return this.composer.compose({
       eventType: normalized.kind === 'click' ? 'VIEW_CLICK' : 'VIEW_CHANGE',
       fields: {
@@ -55,10 +54,8 @@ export class EventDispatcher {
         query: page.query,
         pageShowTimestamp: page.shownAt,
         xpath: normalized.xpath,
-        // A change value is opt-in. Click labels come from the compiler's static data-title only.
-        textValue: normalized.kind === 'change' && !normalized.trackValue ? null : normalized.textValue,
-        index: normalized.index,
-        hyperlink: normalized.hyperlink,
+        textValue: normalized.textValue,
+        ...(normalized.kind === 'click' ? { index: normalized.index, hyperlink: normalized.hyperlink } : {}),
       },
     }).ok
   }

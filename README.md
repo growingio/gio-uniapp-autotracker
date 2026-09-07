@@ -62,17 +62,21 @@ export default {
 }
 ```
 
-无埋点仅处理当前白名单内的内置组件静态 `@click`、`@tap` 与 `@change`；input/textarea 也可采集单独声明的 `@blur` 或 `@confirm`。待实施的普通模板 `xpath` 口径不是结构路径，而是在 runtime 按小程序口径生成 `id#eventName`；`uni-link` 使用 `#openURL`，tabBar 使用 `#onTabItemTap`。同一元素同时声明 `change`、`blur`、`confirm` 时只选择一个完成事件插针，原业务 handler 全部保留。`data-growing-ignore` 和敏感输入会拒绝整条采集，`data-growing-track` 不能覆盖敏感规则；非敏感 `change` 值仅在显式标记 track 时传递。`data-index` 仅接受大于 0 且小于 2147483647 的整数。动态事件、自定义组件、修饰符及歧义 listener 表达式保持业务代码不变、不插桩并产生构建告警。`.nvue` 不在一期模板插桩范围内，也会产生构建告警。完整规则见[无埋点方案](./doc/uniapp-autotrack-design.md)。
+无埋点仅处理当前白名单内的内置组件静态 `@click`、`@tap` 与 `@change`；input/textarea 也可采集单独声明的 `@blur` 或 `@confirm`。普通模板 `xpath` 在 runtime 按小程序口径生成 `id#eventName`；`uni-link` 使用 `#openURL`，tabBar 使用 `#onTabItemTap`。同一元素同时声明 `change`、`blur`、`confirm` 时只选择一个完成事件插针，原业务 handler 全部保留。`data-growing-ignore` 和敏感输入会拒绝整条采集，`data-growing-track` 不能覆盖敏感规则；非敏感 `change` 值仅在显式标记 track 时传递。`data-index` 仅接受大于 0 且小于 2147483647 的整数。动态事件、自定义组件、修饰符及歧义 listener 表达式保持业务代码不变、不插桩并产生构建告警。`.nvue` 不在一期模板插桩范围内，也会产生构建告警。完整规则见[无埋点方案](./doc/uniapp-autotrack-design.md)。
+
+编译侧 `@vue/compiler-dom`、`@vue/compiler-sfc` 与 Vue 统一锁定为 `3.4.21`，与当前 HBuilderX 5.24 工具链一致，避免其全局 `@vue/shared` 别名与新版本编译器混用。
 
 当前实现已完成 TypeScript、Vue 编译与 mock collector 静态覆盖；Android、iOS、HarmonyOS 的真实编译、设备请求和服务端接收仍是发布前必需证据，尚不能据此宣称已完成三端验收。
 
-`appCapabilityProfile(platform)` 可读取发布门禁使用的能力表。当前三端全部为 `false`，直到各端的编译版本、真机请求和 collector 接收记录归档后才可逐项开放。
+`platform/capabilities.ts` 的能力表同时参与无埋点运行时门控。当前三端 `autoClick`、`tabBar` 和逐组件 `autoChange` 全部为 `false`，因此默认不发送模板或 tabBar 的 `VIEW_*`。待对应端的编译版本、真机请求和 collector 接收记录归档后，再逐项开放；单元测试使用内部受控宿主配置；demo 通过专用构建常量 `__GIO_AUTOTRACK_VERIFICATION__` 显式开放待验收链路，便于实机验证。验证开关不会改变生产验收状态，正式应用不要复制。
 
 `debug: true` 只在本地输出 `[GrowingIO Debug]:` 的操作标签与即将派发的协议事件数组；不会输出队列内部元数据，也不会改变隐私、重试或采集行为。
 
 ## Showcase demo
 
-先运行 `pnpm build:sdk`，它将编译产物写入 `demo/uni_modules/gio-uniapp-autotracker`。然后可用 HBuilderX 打开 [demo](./demo) 目录；demo 只引用这份编译产物，不跨目录引用 SDK 源码。它默认采集，以便启动后验证 `VISIT`、生命周期、`track`、身份和用户属性、路由上下文、Vue 3 无埋点及 `dataCollect` 动态开关；如需隐私同意流程，可在 `main.ts` 显式关闭后通过示例页恢复采集。ABTest 和微信分享会明确显示为当前未实现，而非模拟接口结果。详见 [demo/README.md](./demo/README.md)。
+先运行 `pnpm build:sdk`，它将编译产物写入 `demo/uni_modules/gio-uniapp-autotracker`。然后可用 HBuilderX 打开 [demo](./demo) 目录；demo 只引用这份编译产物，不跨目录引用 SDK 源码。它默认采集，以便启动后验证 `VISIT`、生命周期、`track`、身份和用户属性、路由上下文、无埋点业务交互及 `dataCollect` 动态开关；如需隐私同意流程，可在 `main.ts` 显式关闭后通过示例页恢复采集。ABTest 和微信分享会明确显示为当前未实现，而非模拟接口结果。详见 [demo/README.md](./demo/README.md)。
+
+schema v2 与旧编译探针互不兼容，升级时必须整体重新构建 App。同名 handler 无 id 时使用相同标识；需区分的元素应补稳定 `id`，列表附加维度使用规范正整数 `data-index`。迁移说明见[无埋点发布说明](./doc/autotrack-v2-release.md)。
 
 ## 发布目录
 

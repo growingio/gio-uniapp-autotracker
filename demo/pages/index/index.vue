@@ -38,7 +38,7 @@ export default {
         { path: 'custom-event', title: '① 自定义事件 / track', description: '发送业务事件和用户属性，观察属性归一化。' },
         { path: 'user', title: '② 用户身份 / setUserId', description: '设置、切换和清除用户身份及用户属性。' },
         { path: 'lifecycle', title: '③ 生命周期 / VISIT / PAGE / APP_CLOSED', description: '通过切页和前后台切换观察生命周期事件。' },
-        { path: 'autotrack', title: '④ 无埋点 / VIEW_CLICK / VIEW_CHANGE', description: '由 Vite 插桩验证点击、变更、忽略和敏感值规则。' },
+        { path: 'autotrack', title: '④ 无埋点 / VIEW_CLICK / VIEW_CHANGE', description: '按六组实机用例验证点击、变更、Vue 写法、隐私、链接和 tabBar。' },
         { path: 'route', title: '⑤ 路由 / query / referralPage', description: '带 query 跳转，验证 PAGE 上下文。' },
         { path: 'datacollect', title: '⑥ 数据采集开关 / setOptions', description: '动态开启或关闭采集，并检查返回值。' },
       ],

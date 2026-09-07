@@ -21,7 +21,11 @@ import { EventDispatcher } from './event-dispatcher.js'
 import type { PageOrientation } from './orientation.js'
 import { PageLifecycle } from './page-lifecycle.js'
 import { Uploader, type UploaderRuntime } from '../core/uploader.js'
-import type { AutoTrackCall } from '../autotrack/contract.js'
+import type { AutoTrackCall, ChangeElement, NormalizedAutoTrackCall } from '../autotrack/contract.js'
+import { AutoTrackDispatcher } from './autotrack-dispatch.js'
+import { appCapabilityProfile, type AppCapabilityProfile } from '../platform/capabilities.js'
+
+declare const __GIO_AUTOTRACK_VERIFICATION__: boolean
 
 export type TrackerRuntimeDependencies = Readonly<{
   storage: StoragePort
@@ -32,6 +36,8 @@ export type TrackerRuntimeDependencies = Readonly<{
   sessionIdFactory: SessionIdFactory
   orientation: () => PageOrientation
   logger?: LoggerPort
+  /** 仅内部受控宿主验证注入，不通过 gdp init 暴露。 */
+  autoTrackProfile?: AppCapabilityProfile
   network?: NetworkPort
   upload?: Readonly<{ transport: TransportPort; runtime: UploaderRuntime }>
 }>
@@ -49,6 +55,8 @@ type RuntimeState = Readonly<{
   app: AppLifecycle
   page: PageLifecycle
   dispatcher: EventDispatcher
+  pages: PageStore
+  autoTrackProfile: AppCapabilityProfile | null
   uploader: Uploader | null
   stopNetwork: (() => void) | null
 }>
@@ -69,6 +77,7 @@ export class TrackerRuntime {
   private pendingCollectionResume = false
   private hydration: Promise<void> | null = null
   private userKeyIgnoredWarned = false
+  private readonly autoTrackDispatcher = new AutoTrackDispatcher()
 
   public constructor(private readonly dependencies: TrackerRuntimeDependencies) {}
 
@@ -88,7 +97,10 @@ export class TrackerRuntime {
       )
       return false
     }
-    this.hydration = this.hydrate(result.config)
+    this.hydration = this.hydrate(result.config).catch(() => {
+      this.bootstrapFailed = true
+      this.log('error', '[GrowingIO]：SDK初始化失败，运行时初始化异常!')
+    })
     return true
   }
 
@@ -114,9 +126,25 @@ export class TrackerRuntime {
     return this.gate.submit({ kind: 'track', payload: { eventName, properties } }, (intent) => this.emit(intent))
   }
 
-  public autoTrack(call: AutoTrackCall): boolean {
-    if (!this.lifecycle.registeredPlugins().some((plugin) => plugin.name === 'gioEventAutoTracking')) return false
-    return this.gate.submit({ kind: 'autotrack', payload: call as Readonly<Record<string, unknown>> }, (intent) => this.emit(intent))
+  public autoTrack(call: AutoTrackCall, nativeEvent?: unknown): boolean {
+    try {
+      if (!this.ready() || !this.collecting() || !this.lifecycle.registeredPlugins().some((plugin) => plugin.name === 'gioEventAutoTracking')) return false
+      const state = this.state
+      const profile = state?.autoTrackProfile
+      const probe = record(call)
+      if (state === null || profile == null || probe === null) return false
+      const allowed = probe.source === 'tabbar' ? profile.tabBar : probe.kind === 'click' ? profile.autoClick
+        : typeof probe.elementType === 'string' && Object.prototype.hasOwnProperty.call(profile.autoChange, probe.elementType) && profile.autoChange[probe.elementType as ChangeElement]
+      if (!allowed) { this.autoTrackRejected('capability_unverified'); return false }
+      const page = state.pages.current()
+      const accepted = this.autoTrackDispatcher.dispatch(call, nativeEvent, page?.shownAt == null ? null : page.pageKey,
+        (normalized) => this.gate.submit({ kind: 'autotrack', payload: normalized }, (intent) => this.emit(intent)))
+      if (!accepted) this.autoTrackRejected('invalid_or_duplicate')
+      return accepted
+    } catch {
+      this.autoTrackRejected('invalid_probe')
+      return false
+    }
   }
 
   public setUserAttributes(properties: unknown): boolean {
@@ -164,7 +192,7 @@ export class TrackerRuntime {
   /** Only collection consent is mutable after initialization; all init-time options stay fixed. */
   public setOptions(options: unknown): boolean {
     const candidate = record(options)
-    if (candidate === null || Object.keys(candidate).length !== 1 || !Object.hasOwn(candidate, 'dataCollect')) return false
+    if (candidate === null || Object.keys(candidate).length !== 1 || !Object.prototype.hasOwnProperty.call(candidate, 'dataCollect')) return false
     return this.setDataCollect(candidate.dataCollect)
   }
 
@@ -264,7 +292,8 @@ export class TrackerRuntime {
     }
     this.state = {
       identity, identityPersistence, sessionPersistence, metaPersistence, queuePersistence, queue, sequence, sessions, location,
-      app: appWithFlush, page, dispatcher, uploader, stopNetwork,
+      app: appWithFlush, page, dispatcher, pages, uploader, stopNetwork,
+      autoTrackProfile: this.dependencies.autoTrackProfile ?? appCapabilityProfile(hydrated.state.systemContext.platform, typeof __GIO_AUTOTRACK_VERIFICATION__ !== 'undefined' && __GIO_AUTOTRACK_VERIFICATION__ === true),
     }
     this.log('success', '[GrowingIO]：Gio uni-app SDK 初始化完成！')
     this.gate.release((intent) => this.emit(intent))
@@ -293,11 +322,12 @@ export class TrackerRuntime {
     if (state === null) return false
     const payload = record(intent.payload)
     if (payload === null) return false
+    const shownBefore = state.pages.current()
     let emitted = false
     let lifecycleHandled = false
     switch (intent.kind) {
       case 'track': emitted = state.dispatcher.track({ eventName: payload.eventName, properties: payload.properties }); break
-      case 'autotrack': emitted = state.dispatcher.autoTrack(payload as AutoTrackCall); break
+      case 'autotrack': emitted = state.dispatcher.autoTrack(payload as NormalizedAutoTrackCall); break
       case 'app-launch': state.app.onLaunch(payload as AppEntrySnapshot); emitted = true; lifecycleHandled = true; break
       case 'app-show': emitted = state.app.onShow(payload as AppEntrySnapshot).visitQueued; lifecycleHandled = true; break
       case 'app-hide': emitted = state.app.onHide().appClosedQueued; lifecycleHandled = true; break
@@ -308,6 +338,7 @@ export class TrackerRuntime {
       case 'page-unload': if (typeof payload.instanceId === 'string') { state.page.onUnload(payload.instanceId); emitted = true; lifecycleHandled = true }; break
       default: return false
     }
+    if (state.pages.current() !== shownBefore) this.autoTrackDispatcher.reset()
     if (emitted || lifecycleHandled) this.debugAction(intent.kind, payload)
     this.persistAfterEvent()
     return emitted
@@ -360,10 +391,15 @@ export class TrackerRuntime {
   private debugEvents(events: readonly ProtocolEvent[]): void {
     if (this.lifecycle.config()?.debug !== true) return
     try {
-      this.dependencies.logger?.debug('[GrowingIO Debug]:', JSON.stringify(events))
+      // App 调试基座可能只展示 console.log 的第一个参数，必须合成一条完整日志。
+      this.dependencies.logger?.debug(`[GrowingIO Debug]: ${JSON.stringify(events)}`)
     } catch {
       // Diagnostics must never alter collection.
     }
+  }
+
+  private autoTrackRejected(reason: string): void {
+    if (this.lifecycle.config()?.debug === true) this.log('debug', `[GrowingIO Debug]: autotrack_rejected=${reason}`)
   }
 
   private log(level: keyof LoggerPort, message: string): void {

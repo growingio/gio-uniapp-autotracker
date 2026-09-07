@@ -1,6 +1,6 @@
 # 传统 uni-app Vue 3 无埋点方案（1.0）
 
-> **状态：待按本文实施。** 当前代码已经具备 Vite 模板插桩和运行时 dispatcher，但普通模板事件仍上报 `/view[1]` 一类结构路径，tabBar 也仍使用结构路径。本文将二者统一为与小程序、uni-app x 一致的“元素 `id` + 事件名”标识；在本文实现并取得端侧证据前，不能宣称已经完成该口径。
+> **状态：schema v2 代码和受控自动化链路已实现，三端真机验收待完成。** 普通模板在 runtime 生成 `id#eventName`，tabBar 固定为 `#onTabItemTap`。三端尚未取得逐组件设备请求及 collector 接收证据，因此正式构建的 `autoClick`、`tabBar`、逐组件 `autoChange` 仍由能力表禁用；demo 通过独立验证开关开放链路，由用户完成实机验证；不能把静态通过当作三端已支持。
 
 ## 1. 目标与结论
 
@@ -39,7 +39,9 @@ xpath = `${id}#${eventName}`
 |---|---|---|
 | 小程序 SDK | `currentTarget || target` 选择主目标；`id#eventName` 拼接；ignore 同时检查 `currentTarget` 与原始 `target`；tabBar 使用 `#onTabItemTap`、一基 `index` 与 `pagePath`；`data-index` 只接受正整数 | `App/Page/Component` 及业务方法全局重写 |
 | uni-app x SDK | 编译期从事件表达式推导 handler 名；条件表达式按实际分支取名；change 显式传递组件类型、受限值与 picker range；无业务 handler 的 `uni-link` 使用 `openURL`；runtime 再由事件快照生成 `id#eventName` | UTS/uvue bridge 与原生对象模型 |
-| 当前传统 uni-app SDK | Vue 3 SFC AST、Vite `pre` 插件、模块内 dispatcher、隐私开关、页面快照与协议事件构建 | 当前的模板结构 xpath 生成逻辑 |
+| 当前传统 uni-app SDK | Vue 3 SFC AST、Vite `pre` 插件、模块内 dispatcher、隐私开关、页面快照与协议事件构建 | 旧版模板结构 xpath 生成逻辑 |
+
+组件参数参考官方 [picker](https://uniapp.dcloud.net.cn/component/picker) 与 [swiper](https://uniapp.dcloud.net.cn/component/swiper.html) 文档；官方组件事件描述不能代替本 SDK 的逐端采集验收。
 
 ### 2.2 一期范围
 
@@ -81,7 +83,7 @@ const xpath = `${id}#${eventName}`
 
 ### 3.2 版本化 call 合约
 
-当前 `schemaVersion: 1` 的 call 把 `xpath` 当作编译期输入。该含义改变必须升级为 `schemaVersion: 2`，不能兼容地把旧结构路径当作 `eventName` 使用。
+旧版 `schemaVersion: 1` 的 call 把 `xpath` 当作编译期输入。该含义改变必须升级为 `schemaVersion: 2`，不能兼容地把旧结构路径当作 `eventName` 使用。
 
 ```ts
 type TemplateAutoTrackProbe = Readonly<{
@@ -125,7 +127,7 @@ type NormalizedAutoTrackCall =
     }>
 ```
 
-`elementType` 只允许 Vite 从白名单内置组件写入稳定的小写组件名；`pickerRange` 对 picker 只允许有界一维 JSON 数组，对 picker-view 只允许按列组织的有界二维 JSON 数组，`pickerRangeKey` 只允许非空字符串。原始 change payload 不重复塞进 probe，而是由 dispatcher 从第二参数 native event 中即时裁出 `detail.value/current/source`、`target.value`、`target.attr.value` 等受限快照。它们只用于 runtime 的 change 值归一化，不能直接作为协议字段或绕过 `data-growing-track`。picker 优先使用合法 range 中的显示值，无法解析时才保留原始下标；switch 必须保留布尔值语义，swiper 仍按 autoplay 与 `data-title` 规则处理。
+`elementType` 只允许 Vite 从白名单内置组件写入稳定的小写组件名；`pickerRange` 对 picker 只允许有界一维 JSON 数组，对 picker-view 只允许按列组织的有界二维 JSON 数组，`pickerRangeKey` 只允许非空字符串。实现边界为 range 总计最多 1000 项、picker-view 最多 20 列、对象项最多 32 个标量属性，拒绝嵌套对象和访问器；picker-view 的文案或下标统一以 `||` 连接。编译器从固定 picker-view-column 的静态文本或单层 v-for 标量/对象字段读取 range，复杂列渲染只保留规范下标回退。原始 change payload 不重复塞进 probe，而是由 dispatcher 从第二参数 native event 中即时裁出 `detail.value/current/source`、`target.value`、`target.attr.value` 等受限快照。它们只用于 runtime 的 change 值归一化，不能直接作为协议字段或绕过 `data-growing-track`。picker 优先使用合法 range 中的显示值，无法解析时才保留原始下标；switch 必须保留布尔值语义，swiper 仍按 autoplay 与 `data-title` 规则处理。
 
 Vite 只能生成 `TemplateAutoTrackProbe`，page lifecycle bridge 只能生成 `TabBarAutoTrackProbe`；normalizer 产出的 `NormalizedAutoTrackCall` 才能进入 `EventDispatcher`。ignore、敏感、未授权的 change 值等策略在生成 normalized call 前完成：被拒绝的 probe 直接返回 `false`，不能以 `ignored` / `sensitive` 标志继续向下游传递。分类型 union 也保证 `VIEW_CHANGE` 在类型层面没有 `index`、`hyperlink`。版本不匹配、source 与字段组合不匹配、空事件名、非白名单 `elementType`、超限数组或非法 host 值均安全返回 `false`，并只产生脱敏 debug 诊断。原始 native event 仍作为 dispatcher 的瞬时第二参数传入；其 `type`、`timeStamp`、`currentTarget`、`target`、`detail` 只在本次调用内读取，不进入 probe、日志、队列或协议事件。
 
@@ -190,7 +192,7 @@ Options API、普通 `setup()` 与 `<script setup>` 的最终事件口径相同�
 | 场景 | 采集口径 | 必须保证的实现行为 |
 |---|---|---|
 | `<script setup> const submit = ...`，模板 `@tap="submit"` | `eventName = submit` | dispatcher import 注入同一个 `<script setup>`；不改写 `submit` 定义或闭包 |
-| `setup() { return { submit: saveOrder } }`，模板 `@tap="submit"` | `eventName = submit` | 记录模板可见的别名，不试图反查闭包中的 `saveOrder` |
+| `setup() { return { submit: saveOrder } }`，模板 `@tap="submit"` | `eventName = submit` | import 注入普通 script；通过唯一 methods 别名暴露 dispatcher，原 setup 保持不变（含 reactive、异步和 render function 返回值），避免新增 script setup 覆盖原 setup；记录模板可见的别名 |
 | Options API `methods: { submit() {} }` | `eventName = submit` | 无原 setup 块时新增只含 dispatcher import 的 setup 块；Options methods 仍由原 Vue 模板上下文解析 |
 | import、composable 或 ref 暴露给模板的函数 | 使用模板表达式中的名称或成员路径 | 不分析 import 来源、不序列化 ref / reactive / 组件实例 |
 | `defineExpose()` | 不改变模板事件名 | 它面向父组件公开，不是模板 handler 名解析来源 |
@@ -299,7 +301,7 @@ tabBar 不从模板 native event 取 id。页面 lifecycle bridge 将 `onTabItem
 }
 ```
 
-这与小程序一致：tab index 是一基，且 `pagePath` 进入 `hyperlink`。它取代当前 `/tabBar[n]` 与零基 `index` 的行为。普通模板事件和 tabBar 都必须在当前 shown page 的 snapshot 下构建 `VIEW_CLICK`；没有当前页面、插件未注册、`dataCollect=false` 或 normalizer 失败时，安全不采集。
+这与小程序一致：tab index 是一基，且 `pagePath` 进入 `hyperlink`。它取代旧版 tabBar 结构路径与零基 `index` 的行为。普通模板事件和 tabBar 都必须在当前 shown page 的 snapshot 下构建 `VIEW_CLICK`；没有当前页面、插件未注册、`dataCollect=false` 或 normalizer 失败时，安全不采集。
 
 ## 7. 代码改动清单
 

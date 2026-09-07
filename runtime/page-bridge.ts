@@ -21,14 +21,18 @@ function record(value: unknown): Readonly<Record<string, unknown>> | null {
 function tabClickCall(value: unknown): AutoTrackCall | null {
   const source = record(value)
   const index = source?.index
-  if (typeof index !== 'number' || !Number.isSafeInteger(index) || index < 0) return null
+  if (typeof index !== 'number' || !Number.isSafeInteger(index) || index < 0 || index >= 2147483646) return null
   const text = source?.text
+  const pagePath = source?.pagePath
+  if ((text != null && typeof text !== 'string') || (pagePath != null && typeof pagePath !== 'string')) return null
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
+    source: 'tabbar',
     kind: 'click',
-    xpath: `/tabBar[${index + 1}]`,
-    index,
-    ...(typeof text === 'string' || typeof text === 'number' || typeof text === 'boolean' ? { textValue: text } : {}),
+    xpath: '#onTabItemTap',
+    index: index + 1,
+    ...(typeof text === 'string' ? { textValue: text } : {}),
+    ...(typeof pagePath === 'string' ? { hyperlink: pagePath } : {}),
   }
 }
 
@@ -56,8 +60,10 @@ export function createPageLifecycleBridge(target: PageLifecycleTarget, instanceI
     onHide: () => target.onPageHide(stableInstanceId),
     onUnload: () => target.onPageUnload(stableInstanceId),
     onTabItemTap: (options) => {
-      const call = tabClickCall(options)
-      return call === null ? false : target.autoTrack?.(call) ?? false
+      try {
+        const call = tabClickCall(options)
+        return call === null ? false : target.autoTrack?.(call) ?? false
+      } catch { return false }
     },
   }
 }

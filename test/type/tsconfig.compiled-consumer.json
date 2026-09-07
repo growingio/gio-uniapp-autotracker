@@ -3,6 +3,9 @@
   "compilerOptions": {
     "noEmit": true
   },
-  "include": ["gdp-compiled-consumer.ts"],
+  "include": [
+    "gdp-compiled-consumer.ts",
+    "autotrack-consumer.ts"
+  ],
   "exclude": []
 }

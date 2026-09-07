@@ -8,9 +8,15 @@ importers:
 
   .:
     dependencies:
+      '@babel/parser':
+        specifier: ^7.29.8
+        version: 7.29.8
       '@vue/compiler-dom':
-        specifier: ^3.5.13
-        version: 3.5.42
+        specifier: 3.4.21
+        version: 3.4.21
+      '@vue/compiler-sfc':
+        specifier: 3.4.21
+        version: 3.4.21
     devDependencies:
       '@dcloudio/types':
         specifier: 3.4.32

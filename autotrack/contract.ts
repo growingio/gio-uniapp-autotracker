@@ -1,9 +1,21 @@
-export const AUTO_TRACK_SCHEMA_VERSION = 1 as const
+export const AUTO_TRACK_SCHEMA_VERSION = 2 as const
 
-export type AutoTrackCall = Readonly<{
+export const CHANGE_ELEMENTS = ['input', 'textarea', 'switch', 'slider', 'radio-group', 'checkbox-group', 'picker', 'picker-view', 'swiper'] as const
+export type ChangeElement = typeof CHANGE_ELEMENTS[number]
+export const TEMPLATE_ELEMENTS = [
+  'view', 'text', 'image', 'button', 'navigator', 'uni-link', 'scroll-view', 'swiper', 'swiper-item',
+  'input', 'textarea', 'switch', 'slider', 'radio', 'radio-group', 'checkbox', 'checkbox-group',
+  'picker', 'picker-view', 'picker-view-column', 'label', 'icon', 'progress', 'rich-text', 'form', 'editor',
+] as const
+
+export type TemplateAutoTrackProbe = Readonly<{
   schemaVersion: typeof AUTO_TRACK_SCHEMA_VERSION
+  source: 'template'
   kind: 'click' | 'change'
-  xpath: unknown
+  eventName: unknown
+  elementType?: unknown
+  pickerRange?: unknown
+  pickerRangeKey?: unknown
   textValue?: unknown
   index?: unknown
   hyperlink?: unknown
@@ -12,38 +24,17 @@ export type AutoTrackCall = Readonly<{
   sensitive?: unknown
 }>
 
-export type NormalizedAutoTrackCall = Readonly<{
-  kind: 'click' | 'change'
-  xpath: string
-  textValue: string | null
-  index: number | null
-  hyperlink: string | null
-  ignored: boolean
-  trackValue: boolean
-  sensitive: boolean
+export type TabBarAutoTrackProbe = Readonly<{
+  schemaVersion: typeof AUTO_TRACK_SCHEMA_VERSION
+  source: 'tabbar'
+  kind: 'click'
+  xpath: '#onTabItemTap'
+  index: unknown
+  textValue?: unknown
+  hyperlink?: unknown
 }>
 
-function optionalText(value: unknown): string | null {
-  let text: string
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') text = String(value)
-  else if (Array.isArray(value) && value.every((item) => typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean')) text = value.map(String).join('||')
-  else return null
-  const normalized = text.replace(/[\u0000-\u001F\u007F]/g, ' ').trim().slice(0, 100)
-  return normalized.length > 0 ? normalized : null
-}
-
-/** The compiler may only forward this constrained JSON call; component values and host objects are rejected. */
-export function normalizeAutoTrackCall(value: AutoTrackCall): NormalizedAutoTrackCall | null {
-  if (value.schemaVersion !== AUTO_TRACK_SCHEMA_VERSION || (value.kind !== 'click' && value.kind !== 'change') || typeof value.xpath !== 'string' || value.xpath.length === 0) return null
-  const index = typeof value.index === 'number' && Number.isSafeInteger(value.index) && value.index >= 0 ? value.index : null
-  return {
-    kind: value.kind,
-    xpath: value.xpath,
-    textValue: optionalText(value.textValue),
-    index,
-    hyperlink: optionalText(value.hyperlink),
-    ignored: value.ignored === true,
-    trackValue: value.trackValue === true,
-    sensitive: value.sensitive === true,
-  }
-}
+export type AutoTrackCall = TemplateAutoTrackProbe | TabBarAutoTrackProbe
+export type NormalizedAutoTrackCall =
+  | Readonly<{ kind: 'click'; xpath: string; textValue: string | null; index: number | null; hyperlink: string | null }>
+  | Readonly<{ kind: 'change'; xpath: string; textValue: string | null }>

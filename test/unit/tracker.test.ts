@@ -1,3 +1,4 @@
+import { testAutoTrackProfile } from '../support/autotrack-fixture.js'
 import { describe, expect, it } from 'vitest'
 
 import type { AppSystemContext, LoggerPort, NetworkPort, NetworkState, StorageArea, StoragePort, StorageRead, StorageWrite, TransportPort } from '../../core/ports.js'
@@ -33,6 +34,7 @@ const system: AppSystemContext = {
 function createTracker(dataCollect = true, autoTracking = false, debug = false, logger?: LoggerPort) {
   let now = 100
   const tracker = new TrackerRuntime({
+    autoTrackProfile: testAutoTrackProfile,
     storage: new MemoryStorage(), systemContext: { load: async () => system }, clock: { now: () => now },
     timezone: { getOffsetMinutes: () => -480 }, deviceIdFactory: () => 'device-1',
     sessionIdFactory: (() => { let id = 0; return () => `session-${++id}` })(), orientation: () => 'PORTRAIT', logger,
@@ -43,13 +45,28 @@ function createTracker(dataCollect = true, autoTracking = false, debug = false, 
 }
 
 describe('TrackerRuntime', () => {
+  it('reports bootstrap failure when runtime setup throws after hydration', async () => {
+    const errors: string[] = []
+    const tracker = new TrackerRuntime({
+      storage: new MemoryStorage(), systemContext: { load: async () => system }, clock: { now: () => 100 },
+      timezone: { getOffsetMinutes: () => -480 }, deviceIdFactory: () => 'device-1', sessionIdFactory: () => 'session-1',
+      orientation: () => 'PORTRAIT',
+      network: { current: async () => 'WIFI', subscribe: () => { throw new TypeError('host setup failed') } },
+      logger: { info: () => undefined, success: () => undefined, warn: () => undefined, debug: () => undefined, error: (message) => errors.push(message) },
+    })
+    tracker.init({ accountId: 'account', dataSourceId: 'source' })
+    await expect(tracker.whenReady()).resolves.toBe(false)
+    expect(tracker.ready()).toBe(false)
+    expect(tracker.failed()).toBe(true)
+    expect(errors).toEqual(['[GrowingIO]：SDK初始化失败，运行时初始化异常!'])
+  })
+
   it('emits fixed lifecycle diagnostics and only emits event JSON when debug is enabled', async () => {
     const logs: string[] = []
-    const debugEventBatches: string[] = []
     const logger: LoggerPort = {
       info: (message) => logs.push(`info:${message}`), success: (message) => logs.push(`success:${message}`),
       warn: (message) => logs.push(`warn:${message}`), error: (message) => logs.push(`error:${message}`),
-      debug: (message, data) => { logs.push(`debug:${message}`); if (typeof data === 'string') debugEventBatches.push(data) },
+      debug: (message, data) => logs.push(`debug:${message}${data === undefined ? '' : ` ${String(data)}`}`),
     }
     const requests: string[] = []
     const transport: TransportPort = {
@@ -59,6 +76,7 @@ describe('TrackerRuntime', () => {
       },
     }
     const tracker = new TrackerRuntime({
+      autoTrackProfile: testAutoTrackProfile,
       storage: new MemoryStorage(), systemContext: { load: async () => system }, clock: { now: () => 100 },
       timezone: { getOffsetMinutes: () => -480 }, deviceIdFactory: () => 'device-1', sessionIdFactory: () => 'session-1',
       orientation: () => 'PORTRAIT', logger,
@@ -70,7 +88,11 @@ describe('TrackerRuntime', () => {
     expect(logs).toContain('info:[GrowingIO]：Gio uni-app SDK 初始化中...')
     expect(logs).toContain('success:[GrowingIO]：Gio uni-app SDK 初始化完成！')
     expect(logs).toContain('debug:App: onShow 100')
-    expect(debugEventBatches.map((batch) => JSON.parse(batch))).toEqual([expect.arrayContaining([expect.objectContaining({ eventType: 'VISIT' })])])
+    const debugEventLogs = logs.filter((line) => line.startsWith('debug:[GrowingIO Debug]: ['))
+    expect(debugEventLogs).toHaveLength(1)
+    expect(JSON.parse(debugEventLogs[0]!.slice('debug:[GrowingIO Debug]: '.length))).toEqual(
+      expect.arrayContaining([expect.objectContaining({ eventType: 'VISIT' })]),
+    )
     expect(requests).toStrictEqual(['sent'])
   })
 
@@ -113,8 +135,8 @@ describe('TrackerRuntime', () => {
     tracker.onPageShow('home#1', null)
     await tracker.whenReady()
 
-    expect(tracker.autoTrack({ schemaVersion: 1, kind: 'click', xpath: '/button[1]' })).toBe(true)
-    expect(tracker.autoTrack({ schemaVersion: 1, kind: 'change', xpath: '/input[1]' })).toBe(true)
+    expect(tracker.autoTrack({ schemaVersion: 2, source: 'template', kind: 'click', eventName: 'submit' })).toBe(true)
+    expect(tracker.autoTrack({ schemaVersion: 2, source: 'template', kind: 'change', eventName: 'search', elementType: 'input' })).toBe(true)
     expect(logs).toEqual(expect.arrayContaining([
       'debug:[GrowingIO Debug]: action=click',
       'debug:[GrowingIO Debug]: action=change',
@@ -175,6 +197,7 @@ describe('TrackerRuntime', () => {
       setTimeout: () => 1, clearTimeout: () => undefined,
     }
     const tracker = new TrackerRuntime({
+      autoTrackProfile: testAutoTrackProfile,
       storage: new MemoryStorage(), systemContext: { load: async () => system }, clock: { now: () => 100 },
       timezone: { getOffsetMinutes: () => -480 }, deviceIdFactory: () => 'device-1', sessionIdFactory: () => 'session-1',
       orientation: () => 'PORTRAIT', upload: { transport, runtime: uploaderRuntime },
@@ -194,6 +217,7 @@ describe('TrackerRuntime', () => {
       subscribe: (next) => { networkState.listener = next; return () => { networkState.listener = null } },
     }
     const tracker = new TrackerRuntime({
+      autoTrackProfile: testAutoTrackProfile,
       storage: new MemoryStorage(), systemContext: { load: async () => system }, clock: { now: () => 100 },
       timezone: { getOffsetMinutes: () => -480 }, deviceIdFactory: () => 'device-1', sessionIdFactory: () => 'session-1',
       orientation: () => 'PORTRAIT', network,
@@ -209,14 +233,14 @@ describe('TrackerRuntime', () => {
 
   it('requires the built-in auto-tracking plugin before accepting a constrained VIEW intent', async () => {
     const { tracker: unconfigured } = createTracker()
-    expect(unconfigured.autoTrack({ schemaVersion: 1, kind: 'click', xpath: '/x' })).toBe(false)
+    expect(unconfigured.autoTrack({ schemaVersion: 2, source: 'template', kind: 'click', eventName: 'submit' })).toBe(false)
     const { tracker } = createTracker(true, true)
     tracker.onAppShow({ path: '/home', query: '' })
     tracker.onPageLoad({ instanceId: 'home#1', route: 'pages/home/index', query: '', referralPage: null })
     tracker.onPageShow('home#1', null)
     await tracker.whenReady()
-    expect(tracker.autoTrack({ schemaVersion: 1, kind: 'click', xpath: '/view[1]' })).toBe(true)
-    expect(tracker.queuedEvents().at(-1)).toMatchObject({ eventType: 'VIEW_CLICK', xpath: '/view[1]' })
+    expect(tracker.autoTrack({ schemaVersion: 2, source: 'template', kind: 'click', eventName: 'submit' })).toBe(true)
+    expect(tracker.queuedEvents().at(-1)).toMatchObject({ eventType: 'VIEW_CLICK', xpath: '#submit' })
   })
 
   it('accepts only dataCollect through setOptions and preserves the consent transition semantics', async () => {

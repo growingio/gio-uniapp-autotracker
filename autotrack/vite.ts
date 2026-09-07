@@ -1,252 +1,228 @@
-import { NodeTypes, parse, type ElementNode, type RootNode, type TemplateChildNode } from '@vue/compiler-dom'
+import { NodeTypes, parse, type ElementNode, type TemplateChildNode } from '@vue/compiler-dom'
+import { parse as parseSfc } from '@vue/compiler-sfc'
+import { parse as parseScript } from '@babel/parser'
+import { CHANGE_ELEMENTS, TEMPLATE_ELEMENTS } from './contract.js'
+import { containsProbe, expression, metadataExpression, node, rewriteHandler, walk } from './vite-handler.js'
 
 export type AutoTrackTransformWarning = Readonly<{
-  code: 'dynamic_event' | 'missing_handler' | 'event_modifiers' | 'custom_component' | 'unsupported_event' | 'complex_handler'
+  code: 'sfc_parse_error' | 'template_parse_error' | 'dynamic_event' | 'missing_handler' | 'event_modifiers' | 'custom_component' | 'unsupported_event' | 'complex_handler' | 'event_name_fallback' | '.nvue_not_instrumented'
   offset: number
 }>
 export type AutoTrackTemplateTransform = Readonly<{ code: string; warnings: readonly AutoTrackTransformWarning[]; changed: boolean }>
-export type VueSfcTransform = Readonly<{ code: string; warnings: readonly AutoTrackTransformWarning[]; changed: boolean }>
+export type VueSfcTransform = AutoTrackTemplateTransform
 
 type Replacement = Readonly<{ start: number; end: number; value: string }>
-
-const supportedElements = new Set([
-  'view', 'text', 'image', 'button', 'navigator', 'uni-link', 'scroll-view', 'swiper', 'swiper-item',
-  'input', 'textarea', 'switch', 'slider', 'radio', 'radio-group', 'checkbox', 'checkbox-group',
-  'picker', 'picker-view', 'picker-view-column', 'label', 'icon', 'progress', 'rich-text', 'form', 'editor',
-])
-const changeElements = new Set(['input', 'textarea', 'switch', 'slider', 'radio-group', 'checkbox-group', 'picker', 'picker-view', 'swiper'])
-const inputChangeEvents = new Set(['change', 'blur', 'confirm'])
-
-function escape(value: string): string { return JSON.stringify(value) }
-function templateLiteral(value: string): string {
-  return `\`${value.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$\{/g, '\\${')}\``
+const inputEvents = ['change', 'blur', 'confirm']
+const marker = '#__GIO_AUTOTRACK_V2__'
+function literal(value: string): string { return JSON.stringify(value) }
+function attribute(value: string): string { return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;') }
+function apply(source: string, replacements: Replacement[]): string {
+  for (const replacement of replacements.sort((a, b) => b.start - a.start)) source = source.slice(0, replacement.start) + replacement.value + source.slice(replacement.end)
+  return source
 }
-
-type StaticProbeMetadata = Readonly<{
-  ignored: boolean
-  trackValue: boolean
-  sensitive: boolean
-  textValue: string | null
-  index: number | null
-  hyperlink: string | null
-}>
-
-function staticProbeMetadata(element: ElementNode): StaticProbeMetadata {
-  let ignored = false
-  let trackValue = false
-  let sensitive = false
-  let textValue: string | null = null
-  let index: number | null = null
-  let hyperlink: string | null = null
-  let inputType: string | null = null
-  let hasBoundType = false
+function bound(element: ElementNode, name: string): string | null {
   for (const prop of element.props) {
-    if (prop.type === NodeTypes.ATTRIBUTE) {
-      if (prop.name === 'data-growing-ignore') ignored = true
-      if (prop.name === 'data-growing-track') trackValue = true
-      if (prop.name === 'data-growing-sensitive') sensitive = true
-      if (prop.name === 'data-title') textValue = prop.value?.content ?? null
-      if (prop.name === 'data-src') hyperlink = prop.value?.content ?? null
-      if (prop.name === 'data-index') {
-        const candidate = Number(prop.value?.content)
-        index = Number.isSafeInteger(candidate) && candidate >= 0 ? candidate : null
-      }
-      if (prop.name === 'type') inputType = prop.value?.content?.toLowerCase() ?? ''
-      continue
-    }
-    if (prop.name === 'bind' && prop.arg?.type === NodeTypes.SIMPLE_EXPRESSION && prop.arg.isStatic && prop.arg.content === 'type') hasBoundType = true
+    if (prop.type === NodeTypes.ATTRIBUTE && prop.name === name) return literal(prop.value?.content ?? '')
+    if (prop.type === NodeTypes.DIRECTIVE && prop.name === 'bind' && prop.arg?.type === NodeTypes.SIMPLE_EXPRESSION
+      && prop.arg.isStatic && prop.arg.content === name && prop.exp?.type === NodeTypes.SIMPLE_EXPRESSION) return metadataExpression(prop.exp.content)
   }
-  if ((element.tag === 'input' || element.tag === 'textarea') && (hasBoundType || inputType === 'password' || inputType === 'file')) sensitive = true
-  return { ignored, trackValue, sensitive, textValue, index, hyperlink }
+  return null
+}
+function hasBound(element: ElementNode, name: string): boolean {
+  return element.props.some((prop) => prop.type === NodeTypes.DIRECTIVE && prop.name === 'bind'
+    && (prop.arg === undefined || prop.arg.type !== NodeTypes.SIMPLE_EXPRESSION || !prop.arg.isStatic || prop.arg.content === name))
+}
+function sensitive(element: ElementNode): boolean {
+  if (element.tag !== 'input' && element.tag !== 'textarea') return false
+  return hasBound(element, 'type') || hasBound(element, 'password') || element.props.some((prop) => prop.type === NodeTypes.ATTRIBUTE
+    && ((prop.name === 'type' && ['password', 'safe-password', 'file'].includes(prop.value?.content.toLowerCase() ?? ''))
+      || (prop.name === 'password' && prop.value?.content !== 'false')))
+}
+function staticText(element: ElementNode): string | null {
+  let value = ''
+  for (const child of element.children) {
+    if (child.type === NodeTypes.TEXT) value += child.content
+    else if (child.type === NodeTypes.ELEMENT) { const nested = staticText(child); if (nested === null) return null; value += nested }
+    else if (child.type !== NodeTypes.COMMENT) return null
+  }
+  return value.trim()
 }
 
-function probeCall(kind: 'click' | 'change', xpath: string, metadata: StaticProbeMetadata): string {
-  const fields = ['schemaVersion:1', `kind:${templateLiteral(kind)}`, `xpath:${templateLiteral(xpath)}`]
-  if (metadata.ignored) fields.push('ignored:true')
-  if (metadata.trackValue) fields.push('trackValue:true')
-  if (metadata.sensitive) fields.push('sensitive:true')
-  if (metadata.textValue !== null) fields.push(`textValue:${templateLiteral(metadata.textValue)}`)
-  if (metadata.index !== null) fields.push(`index:${metadata.index}`)
-  if (metadata.hyperlink !== null) fields.push(`hyperlink:${templateLiteral(metadata.hyperlink)}`)
+// picker-view 本身没有 range 属性；从固定列的简单选项模板取得 range，复杂渲染保留下标回退。
+function pickerColumns(element: ElementNode): { range: string; key: string | null } | null {
+  const ranges: string[] = []
+  const keys: (string | null)[] = []
+  for (const column of element.children) {
+    if (column.type === NodeTypes.TEXT && column.content.trim() === '' || column.type === NodeTypes.COMMENT) continue
+    if (column.type !== NodeTypes.ELEMENT || column.tag !== 'picker-view-column' || column.props.some((prop) => prop.type === NodeTypes.DIRECTIVE && ['for', 'if'].includes(prop.name))) return null
+    const options = column.children.filter((child) => child.type !== NodeTypes.COMMENT && !(child.type === NodeTypes.TEXT && child.content.trim() === ''))
+    const option = options[0]
+    const loop = option?.type === NodeTypes.ELEMENT ? option.props.find((prop) => prop.type === NodeTypes.DIRECTIVE && prop.name === 'for') : undefined
+    if (options.length === 1 && option?.type === NodeTypes.ELEMENT && loop?.type === NodeTypes.DIRECTIVE && loop.exp?.type === NodeTypes.SIMPLE_EXPRESSION) {
+      const match = /^\s*\(?\s*([\w$]+)(?:\s*,\s*[\w$]+)?\s*\)?\s+(?:in|of)\s+([\s\S]+)$/.exec(loop.exp.content)
+      const range = match?.[2] === undefined ? null : metadataExpression(match[2])
+      const content = option.children.filter((child) => !(child.type === NodeTypes.TEXT && child.content.trim() === ''))
+      if (match === null || range === null || content.length !== 1 || content[0]?.type !== NodeTypes.INTERPOLATION || content[0].content.type !== NodeTypes.SIMPLE_EXPRESSION) return null
+      const label = content[0].content.content.trim()
+      if (label !== match[1] && !new RegExp(`^${match[1]?.replace(/\$/g, '\\$')}\\.[A-Za-z_$][\\w$]*$`).test(label)) return null
+      ranges.push(range)
+      keys.push(label === match[1] ? null : label.slice(label.indexOf('.') + 1))
+    } else {
+      const labels: string[] = []
+      for (const child of options) {
+        if (child.type !== NodeTypes.ELEMENT || child.props.some((prop) => prop.type === NodeTypes.DIRECTIVE && ['for', 'if'].includes(prop.name))) return null
+        const label = staticText(child)
+        if (label === null) return null
+        labels.push(literal(label))
+      }
+      ranges.push(`[${labels.join(',')}]`)
+      keys.push(null)
+    }
+  }
+  return ranges.length > 0 && keys.every((key) => key === keys[0]) ? { range: `[${ranges.join(',')}]`, key: keys[0] ?? null } : null
+}
+function probeFields(element: ElementNode, kind: 'click' | 'change', name: string): string {
+  const fields = ['schemaVersion:2', 'source:"template"', `kind:${literal(kind)}`, `eventName:${literal(name)}`, `elementType:${literal(element.tag)}`]
+  const names = { 'data-title': 'textValue', 'data-index': 'index', 'data-src': 'hyperlink', 'data-growing-ignore': 'ignored', 'data-growing-track': 'trackValue', 'data-growing-sensitive': 'sensitive' }
+  for (const [prop, field] of Object.entries(names)) {
+    if (field === 'sensitive' && sensitive(element)) continue
+    const value = bound(element, prop)
+    if (value !== null) fields.push(`${field}:${value}`)
+  }
+  if (sensitive(element)) fields.push('sensitive:true')
+  if (element.tag === 'uni-link' && bound(element, 'data-src') === null) {
+    const href = bound(element, 'href')
+    if (href !== null) fields.push(`hyperlink:${href}`)
+  }
+  if (kind === 'change' && element.tag === 'picker') {
+    const range = bound(element, 'range')
+    const key = bound(element, 'range-key')
+    if (range !== null) fields.push(`pickerRange:${range}`)
+    if (key !== null) fields.push(`pickerRangeKey:${key}`)
+  }
+  if (kind === 'change' && element.tag === 'picker-view') {
+    const columns = pickerColumns(element)
+    if (columns !== null) { fields.push(`pickerRange:${columns.range}`); if (columns.key !== null) fields.push(`pickerRangeKey:${literal(columns.key)}`) }
+  }
   return `{${fields.join(',')}}`
 }
-
-/** Vue treats a bare method reference as an event listener; after prefixing it must still be called. */
-function rewrittenHandler(probe: string, original: string): string {
-  const expression = original.trim()
-  const isMethodReference = methodReference(expression)
-  return isMethodReference ? `${probe};${expression}($event)` : `${probe};${original}`
-}
-
-function methodReference(expression: string): boolean {
-  return /^[A-Za-z_$][\w$]*(?:\s*\.\s*[A-Za-z_$][\w$]*)*$/.test(expression)
-}
-
-function isArrowListener(expression: string): boolean {
-  return /^(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>/.test(expression.trim())
-}
-
-function isConditionalListener(expression: string): boolean {
-  const match = /^.+?\?\s*(.+?)\s*:\s*(.+)$/.exec(expression.trim())
-  return match !== null && (methodReference(match[1] ?? '') || isArrowListener(match[1] ?? ''))
-    && (methodReference(match[2] ?? '') || isArrowListener(match[2] ?? ''))
-}
-
-function handlerRewrite(probe: string, original: string): string | null {
-  const expression = original.trim()
-  if (isArrowListener(expression) || isConditionalListener(expression)) {
-    // These expressions produce an event listener value. Invoke that value after the probe so its
-    // parameter, return value and thrown error retain the original listener semantics.
-    return `($event)=>{${probe};return (${expression})($event)}`
-  }
-  if (expression.includes('=>') || expression.includes('?')) return null
-  return rewrittenHandler(probe, original)
-}
-
-function openingTagEnd(element: ElementNode): number | null {
-  const source = element.loc.source
-  let quote: '"' | "'" | null = null
-  for (let offset = 0; offset < source.length; offset += 1) {
-    const character = source[offset]
-    if (quote !== null) {
-      if (character === quote) quote = null
-      continue
-    }
-    if (character === '"' || character === "'") { quote = character; continue }
-    if (character === '>') return element.loc.start.offset + offset
+function openingEnd(element: ElementNode): number | null {
+  let quote = ''
+  for (let i = 0; i < element.loc.source.length; i++) {
+    const char = element.loc.source[i]
+    if (quote) { if (char === quote) quote = ''; continue }
+    if (char === '"' || char === "'") { quote = char; continue }
+    if (char === '>') return element.loc.start.offset + (element.loc.source[i - 1] === '/' ? i - 1 : i)
   }
   return null
 }
-
-function selectedChangeEvent(element: ElementNode): string | null {
-  // When one input declares more than one completion callback, use one deterministic probe rather
-  // than letting change/blur/confirm create three indistinguishable VIEW_CHANGE records.
-  for (const name of ['change', 'blur', 'confirm']) {
-    if (element.props.some((prop) => prop.type === NodeTypes.DIRECTIVE && prop.name === 'on'
-      && prop.arg?.type === NodeTypes.SIMPLE_EXPRESSION && prop.arg.isStatic && prop.arg.content === name)) return name
-  }
-  return null
-}
-
-function visit(nodes: readonly TemplateChildNode[], parentPath: string, replacements: Replacement[], warnings: AutoTrackTransformWarning[]): void {
-  const occurrences = new Map<string, number>()
-  for (const node of nodes) {
-    if (node.type !== NodeTypes.ELEMENT) continue
-    const element = node as ElementNode
-    const index = (occurrences.get(element.tag) ?? 0) + 1
-    occurrences.set(element.tag, index)
-    const xpath = `${parentPath}/${element.tag}[${index}]`
-    const metadata = staticProbeMetadata(element)
-    const selectedInputChangeEvent = selectedChangeEvent(element)
-    let hasClickHandler = false
-    let hasDynamicEvent = false
+function visit(nodes: readonly TemplateChildNode[], dispatcher: string, replacements: Replacement[], warnings: AutoTrackTransformWarning[]): void {
+  for (const element of nodes) {
+    if (element.type !== NodeTypes.ELEMENT) continue
+    const selected = inputEvents.find((name) => element.props.some((prop) => prop.type === NodeTypes.DIRECTIVE && prop.name === 'on' && prop.arg?.type === NodeTypes.SIMPLE_EXPRESSION && prop.arg.isStatic && prop.arg.content === name))
+    let hasClick = false
+    let hasDynamic = false
     for (const prop of element.props) {
       if (prop.type !== NodeTypes.DIRECTIVE || prop.name !== 'on') continue
-      if (prop.arg === undefined || prop.arg.type !== NodeTypes.SIMPLE_EXPRESSION || !prop.arg.isStatic) { hasDynamicEvent = true; warnings.push({ code: 'dynamic_event', offset: prop.loc.start.offset }); continue }
-      if (prop.arg.content !== 'click' && prop.arg.content !== 'tap' && !inputChangeEvents.has(prop.arg.content)) continue
-      if (prop.arg.content === 'click' || prop.arg.content === 'tap') hasClickHandler = true
-      if (prop.exp === undefined || prop.exp.type !== NodeTypes.SIMPLE_EXPRESSION) { warnings.push({ code: 'missing_handler', offset: prop.loc.start.offset }); continue }
-      if (prop.modifiers.length > 0) { warnings.push({ code: 'event_modifiers', offset: prop.loc.start.offset }); continue }
-      const probe = `__gioAutoTrack(${probeCall(prop.arg.content === 'click' || prop.arg.content === 'tap' ? 'click' : 'change', xpath, metadata)},$event)`
-      const rewritten = handlerRewrite(probe, prop.exp.content)
-      if (rewritten === null) { warnings.push({ code: 'complex_handler', offset: prop.loc.start.offset }); continue }
-      if (!supportedElements.has(element.tag)) { warnings.push({ code: 'custom_component', offset: prop.loc.start.offset }); continue }
-      if (inputChangeEvents.has(prop.arg.content)) {
-        const supportsEvent = prop.arg.content === 'change' ? changeElements.has(element.tag) : element.tag === 'input' || element.tag === 'textarea'
-        if (!supportsEvent) { warnings.push({ code: 'unsupported_event', offset: prop.loc.start.offset }); continue }
-        if (selectedInputChangeEvent !== prop.arg.content) continue
-      }
-      if (prop.exp.content.includes('__gioAutoTrack')) continue
-      replacements.push({
-        start: prop.exp.loc.start.offset,
-        end: prop.exp.loc.end.offset,
-        value: rewritten,
-      })
+      const warn = (code: AutoTrackTransformWarning['code']): void => { warnings.push({ code, offset: prop.loc.start.offset }) }
+      if (prop.arg?.type !== NodeTypes.SIMPLE_EXPRESSION || !prop.arg.isStatic) { hasDynamic = true; warn('dynamic_event'); continue }
+      const nativeName = prop.arg.content
+      const click = nativeName === 'click' || nativeName === 'tap'
+      if (click) hasClick = true
+      if (prop.exp?.type !== NodeTypes.SIMPLE_EXPRESSION || prop.exp.content.trim() === '') { warn('missing_handler'); continue }
+      const parsed = expression(prop.exp.content)
+      if (parsed !== null && containsProbe(parsed, dispatcher)) continue
+      if (prop.modifiers.length > 0) { warn('event_modifiers'); continue }
+      if (!(TEMPLATE_ELEMENTS as readonly string[]).includes(element.tag)) { warn('custom_component'); continue }
+      if (!click && (!inputEvents.includes(nativeName) || !(CHANGE_ELEMENTS as readonly string[]).includes(element.tag)
+        || (nativeName !== 'change' && element.tag !== 'input' && element.tag !== 'textarea'))) { warn('unsupported_event'); continue }
+      if (!click && (element.tag === 'input' || element.tag === 'textarea') && nativeName !== selected) continue
+      const rewritten = rewriteHandler(prop.exp.content, nativeName, dispatcher, (name) => `${dispatcher}(${probeFields(element, click ? 'click' : 'change', name)},$event)`)
+      if (rewritten === null) { warn('complex_handler'); continue }
+      if (rewritten.fallback) warn('event_name_fallback')
+      const before = element.loc.source[prop.exp.loc.start.offset - element.loc.start.offset - 1]
+      const escaped = attribute(rewritten.code)
+      replacements.push({ start: prop.exp.loc.start.offset, end: prop.exp.loc.end.offset, value: before === '"' || before === "'" ? escaped : `"${escaped}"` })
     }
-    if (element.tag === 'uni-link' && !hasClickHandler && !hasDynamicEvent && !metadata.ignored) {
-      const end = openingTagEnd(element)
-      if (end !== null) {
-        const localEnd = end - element.loc.start.offset
-        const insertAt = element.loc.source[localEnd - 1] === '/' ? end - 1 : end
-        replacements.push({
-          start: insertAt,
-          end: insertAt,
-          value: ` @click="__gioAutoTrack(${probeCall('click', xpath, metadata)},$event)"`,
-        })
-      }
+    if (element.tag === 'uni-link' && !hasClick && !hasDynamic) {
+      const end = openingEnd(element)
+      if (end !== null) replacements.push({ start: end, end, value: ` @click="${attribute(`${dispatcher}(${probeFields(element, 'click', 'openURL')},$event)`)}"` })
     }
-    visit(element.children, xpath, replacements, warnings)
+    visit(element.children, dispatcher, replacements, warnings)
   }
 }
 
-/** AST-based template transform; only prefaces a known static handler and never replaces its expression. */
-export function transformAutoTrackTemplate(template: string): AutoTrackTemplateTransform {
-  let root: RootNode
-  try { root = parse(template) } catch { return { code: template, warnings: [], changed: false } }
-  const replacements: Replacement[] = []
+export function transformAutoTrackTemplate(template: string, dispatcher = 'gioAutoTrack'): AutoTrackTemplateTransform {
   const warnings: AutoTrackTransformWarning[] = []
-  visit(root.children, '', replacements, warnings)
-  let code = template
-  for (const replacement of replacements.sort((left, right) => right.start - left.start)) {
-    code = `${code.slice(0, replacement.start)}${replacement.value}${code.slice(replacement.end)}`
+  let root
+  try { root = parse(template, { onError: (error) => { warnings.push({ code: 'template_parse_error', offset: error.loc?.start.offset ?? 0 }) } }) }
+  catch { return { code: template, warnings: [{ code: 'template_parse_error', offset: 0 }], changed: false } }
+  if (warnings.length > 0) return { code: template, warnings, changed: false }
+  const replacements: Replacement[] = []
+  visit(root.children, dispatcher, replacements, warnings)
+  return { code: apply(template, replacements), warnings, changed: replacements.length > 0 }
+}
+
+export function transformAutoTrackSfc(source: string, runtimeImport = 'gio-uniapp-autotracker/autotrack'): VueSfcTransform {
+  const parsed = parseSfc(source)
+  if (parsed.errors.length > 0) return { code: source, changed: false, warnings: parsed.errors.map((error) => ({ code: 'sfc_parse_error', offset: typeof error === 'object' && 'loc' in error ? error.loc?.start.offset ?? 0 : 0 })) }
+  const { template, script, scriptSetup } = parsed.descriptor
+  if (template === null) return { code: source, warnings: [], changed: false }
+  if (template.src || (template.lang && template.lang !== 'html') || scriptSetup?.src || script?.src) return { code: source, changed: false, warnings: [{ code: 'sfc_parse_error', offset: template.loc.start.offset }] }
+  let existing: string | null = null
+  let setupDefault: { start: number; end: number } | null = null
+  try {
+    for (const block of [scriptSetup, script]) {
+      if (block === null) continue
+      const ast = parseScript(block.content, { sourceType: 'module', plugins: ['typescript'] })
+      for (const entry of ast.program.body) {
+        if (block === script && scriptSetup === null && entry.type === 'ExportDefaultDeclaration') {
+          let hasSetup = entry.declaration.type !== 'ObjectExpression'
+          walk(entry.declaration, (value) => { if ((value.type === 'SpreadElement' || ['ObjectMethod', 'ObjectProperty'].includes(value.type)) && (value.type === 'SpreadElement' || node(value.key)?.name === 'setup' || value.computed || node(value.key)?.value === 'setup')) hasSetup = true })
+          if (hasSetup && entry.declaration.start != null && entry.declaration.end != null) setupDefault = { start: entry.declaration.start, end: entry.declaration.end }
+        }
+        if (entry.type !== 'ImportDeclaration' || entry.source.value !== runtimeImport || !entry.leadingComments?.some((comment) => comment.value.trim() === marker)) continue
+        for (const specifier of entry.specifiers) if (specifier.type === 'ImportSpecifier' && specifier.imported.type === 'Identifier' && specifier.imported.name === 'dispatchAutoTrack') existing = specifier.local.name
+      }
+    }
+  } catch { return { code: source, warnings: [{ code: 'sfc_parse_error', offset: scriptSetup?.loc.start.offset ?? script?.loc.start.offset ?? 0 }], changed: false } }
+  const names = new Set(source.match(/[A-Za-z_$][\w$]*/g) ?? [])
+  let dispatcher = 'gioAutoTrack'
+  for (let suffix = 1; [...names].some((name) => name.startsWith(dispatcher)); suffix++) dispatcher = `gioAutoTrack${suffix}`
+  dispatcher = existing ?? dispatcher
+  const transformed = transformAutoTrackTemplate(template.content, dispatcher)
+  const warnings = transformed.warnings.map((warning) => ({ ...warning, offset: warning.offset + template.loc.start.offset }))
+  if (!transformed.changed) return { code: source, warnings, changed: false }
+  const replacements: Replacement[] = [{ start: template.loc.start.offset, end: template.loc.end.offset, value: transformed.code }]
+  if (existing === null) {
+    const imported = `\n/* ${marker} */\nimport { dispatchAutoTrack as ${dispatcher} } from ${literal(runtimeImport)}\n`
+    if (scriptSetup !== null) replacements.push({ start: scriptSetup.loc.start.offset, end: scriptSetup.loc.start.offset, value: imported })
+    else if (script !== null && setupDefault !== null) {
+      // 普通 setup 必须原样保留（包括 reactive、异步和 render 返回值），通过独立 methods 绑定暴露探针。
+      const component = `${dispatcher}Component`
+      const original = script.content.slice(setupDefault.start, setupDefault.end)
+      const wrapped = `((${component})=>({...${component},methods:{...${component}.methods,${dispatcher}}}))(${original})`
+      replacements.push({ start: script.loc.start.offset, end: script.loc.start.offset, value: imported })
+      replacements.push({ start: script.loc.start.offset + setupDefault.start, end: script.loc.start.offset + setupDefault.end, value: wrapped })
+    } else replacements.push({ start: 0, end: 0, value: `<script setup${script?.lang ? ` lang="${attribute(script.lang)}"` : ''}>${imported}</script>\n` })
   }
-  return { code, warnings, changed: replacements.length > 0 }
+  return { code: apply(source, replacements), warnings, changed: true }
 }
-
-function injectDispatcherImport(source: string, runtimeImport: string): string {
-  const imported = `import { dispatchAutoTrack as __gioAutoTrack } from ${escape(runtimeImport)}`
-  if (source.includes('dispatchAutoTrack as __gioAutoTrack')) return source
-  // Template expressions resolve setup bindings directly, while an Options API script exposes
-  // only component instance members. Keep the import in a setup block for both SFC forms.
-  const script = /<script\s+setup(?:\s[^>]*)?>/i.exec(source)
-  if (script === null) return `<script setup>\n${imported}\n</script>\n${source}`
-  const offset = script.index + script[0].length
-  return `${source.slice(0, offset)}\n${imported}\n${source.slice(offset)}`
-}
-
-/** Transforms only Vue3 SFC templates and injects the dispatcher import once when a probe was added. */
-export function transformAutoTrackSfc(source: string, runtimeImport = 'gio-uniapp-autotracker'): VueSfcTransform {
-  const match = /<template(?:\s[^>]*)?>([\s\S]*?)<\/template>/i.exec(source)
-  if (match === null || match.index === undefined) return { code: source, warnings: [], changed: false }
-  const template = match[1] ?? ''
-  const transformed = transformAutoTrackTemplate(template)
-  if (!transformed.changed) return { code: source, warnings: transformed.warnings, changed: false }
-  const start = match.index + match[0].indexOf(template)
-  const withTemplate = `${source.slice(0, start)}${transformed.code}${source.slice(start + template.length)}`
-  return { code: injectDispatcherImport(withTemplate, runtimeImport), warnings: transformed.warnings, changed: true }
-}
-
-export type UniAppAutoTrackVitePlugin = Readonly<{
-  name: string
-  enforce: 'pre'
-  transform: (source: string, id: string) => Readonly<{ code: string }> | null
-}>
 
 export type UniAppAutoTrackViteContext = Readonly<{ warn?: (message: string) => void }>
-
-export type UniAppAutoTrackViteOptions = Readonly<{
-  enabled?: boolean
-  runtimeImport?: string
-}>
-
-function resolveViteOptions(options: string | UniAppAutoTrackViteOptions | undefined): Readonly<{ enabled: boolean; runtimeImport: string }> {
-  if (typeof options === 'string') return { enabled: true, runtimeImport: options }
-  return { enabled: options?.enabled !== false, runtimeImport: options?.runtimeImport ?? 'gio-uniapp-autotracker/autotrack' }
-}
-
+export type UniAppAutoTrackVitePlugin = Readonly<{ name: string; enforce: 'pre'; transform: (this: UniAppAutoTrackViteContext | void, source: string, id: string) => Readonly<{ code: string }> | null }>
+export type UniAppAutoTrackViteOptions = Readonly<{ enabled?: boolean; runtimeImport?: string }>
 export function gioUniappAutoTrack(options?: string | UniAppAutoTrackViteOptions): UniAppAutoTrackVitePlugin {
-  const resolved = resolveViteOptions(options)
+  const runtimeImport = typeof options === 'string' ? options : options?.runtimeImport ?? 'gio-uniapp-autotracker/autotrack'
   return {
-    name: 'gio-uniapp-autotrack',
-    enforce: 'pre',
-    transform: function (this: UniAppAutoTrackViteContext | undefined, source, id) {
-      if (id.endsWith('.nvue')) {
-        this?.warn?.(`[gio-uniapp-autotrack] .nvue is not instrumented in 1.0: ${id}`)
-        return null
-      }
-      if (!resolved.enabled || !id.endsWith('.vue')) return null
-      const transformed = transformAutoTrackSfc(source, resolved.runtimeImport)
-      return transformed.changed ? { code: transformed.code } : null
+    name: 'gio-uniapp-autotrack', enforce: 'pre',
+    transform(source, id) {
+      if (typeof options !== 'string' && options?.enabled === false) return null
+      if (id.endsWith('.nvue')) { this?.warn?.(`[gio-uniapp-autotrack] ${id}:0 .nvue_not_instrumented`); return null }
+      if (!id.endsWith('.vue')) return null
+      const result = transformAutoTrackSfc(source, runtimeImport)
+      for (const warning of result.warnings) this?.warn?.(`[gio-uniapp-autotrack] ${id}:${warning.offset} ${warning.code}`)
+      return result.changed ? { code: result.code } : null
     },
   }
 }

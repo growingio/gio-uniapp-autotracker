@@ -1,40 +1,65 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { AutoTrackDispatcher, dispatchAutoTrack, installAutoTrackDispatcher } from '../../runtime/autotrack-dispatch.js'
 
-import { dispatchAutoTrack, installAutoTrackDispatcher } from '../../runtime/autotrack-dispatch.js'
+const click = { schemaVersion: 2, source: 'template', kind: 'click', eventName: 'save' } as const
+const event = (timeStamp: unknown = 10, id = 'buy', type = 'tap') => ({ type, timeStamp, currentTarget: { id, dataset: { title: 'Buy' } } })
 
-describe('dispatchAutoTrack', () => {
-  it('is safe without a target and isolates target errors from compiled handlers', () => {
-    expect(dispatchAutoTrack({ schemaVersion: 1, kind: 'click', xpath: '/x' })).toBe(false)
-    installAutoTrackDispatcher({ autoTrack: () => { throw new Error('sdk error') } })
-    expect(dispatchAutoTrack({ schemaVersion: 1, kind: 'click', xpath: '/x' })).toBe(false)
+describe('autotrack dispatcher', () => {
+  it('isolates missing targets and SDK errors', () => {
+    expect(dispatchAutoTrack(click)).toBe(false)
+    installAutoTrackDispatcher({ autoTrack: () => { throw new Error('SDK') } })
+    expect(dispatchAutoTrack(click)).toBe(false)
     installAutoTrackDispatcher({ autoTrack: () => true })
-    expect(dispatchAutoTrack({ schemaVersion: 1, kind: 'change', xpath: '/x' })).toBe(true)
+    expect(dispatchAutoTrack(click)).toBe(true)
   })
-
-  it('deduplicates only an identical probe from the same native event', () => {
-    const calls: string[] = []
-    installAutoTrackDispatcher({ autoTrack: (call) => { calls.push(String(call.xpath)); return true } })
-    const nativeEvent = {}
-    expect(dispatchAutoTrack({ schemaVersion: 1, kind: 'click', xpath: '/view[1]' }, nativeEvent)).toBe(true)
-    expect(dispatchAutoTrack({ schemaVersion: 1, kind: 'click', xpath: '/view[1]' }, nativeEvent)).toBe(false)
-    expect(dispatchAutoTrack({ schemaVersion: 1, kind: 'click', xpath: '/view[1]/text[1]' }, nativeEvent)).toBe(true)
-    expect(dispatchAutoTrack({ schemaVersion: 1, kind: 'click', xpath: '/view[1]' }, {})).toBe(true)
-    expect(calls).toStrictEqual(['/view[1]', '/view[1]/text[1]', '/view[1]'])
+  it('deduplicates normalized probes on one object while preserving different bound targets', () => {
+    const dispatcher = new AutoTrackDispatcher()
+    const emit = vi.fn(() => true)
+    const native = event()
+    expect(dispatcher.dispatch(click, native, 'home', emit)).toBe(true)
+    expect(dispatcher.dispatch(click, native, 'home', emit)).toBe(false)
+    native.currentTarget.id = 'parent'
+    expect(dispatcher.dispatch(click, native, 'home', emit)).toBe(true)
+    expect(emit).toHaveBeenCalledTimes(2)
+    expect(emit.mock.calls[0]).toEqual([{ kind: 'click', xpath: 'buy#save', textValue: 'Buy', index: null, hyperlink: null }])
   })
-
-  it('snapshots dynamic metadata and values without forwarding the native event', () => {
-    let captured: unknown = null
-    installAutoTrackDispatcher({ autoTrack: (call) => { captured = call; return true } })
-    const nativeEvent = {
-      currentTarget: { type: 'text', dataset: { growingTrack: true, title: 'Dynamic title', index: 0, src: '/detail' } },
-      detail: { value: false },
+  it('deduplicates separate wrappers only within a finite positive timestamp window', () => {
+    const dispatcher = new AutoTrackDispatcher()
+    const emit = vi.fn(() => true)
+    expect(dispatcher.dispatch(click, event(20), 'home', emit)).toBe(true)
+    expect(dispatcher.dispatch(click, event(29), 'home', emit)).toBe(false)
+    expect(dispatcher.dispatch(click, event(30), 'home', emit)).toBe(true)
+    expect(dispatcher.dispatch(click, event(25), 'home', emit)).toBe(false)
+    expect(dispatcher.dispatch(click, event(31, 'buy', 'click'), 'home', emit)).toBe(true)
+    expect(dispatcher.dispatch(click, event(31, 'buy'), 'other', emit)).toBe(true)
+    dispatcher.reset()
+    expect(dispatcher.dispatch(click, event(31), 'home', emit)).toBe(true)
+  })
+  it.each([0, undefined, NaN, Infinity, -1, '10'])('does not merge distinct events with timestamp %s', (timeStamp) => {
+    const dispatcher = new AutoTrackDispatcher()
+    const emit = vi.fn(() => true)
+    const first = { ...event(), timeStamp }
+    expect(dispatcher.dispatch(click, first, 'home', emit)).toBe(true)
+    expect(dispatcher.dispatch(click, { ...first }, 'home', emit)).toBe(true)
+  })
+  it('preserves changes in normalized text, index, hyperlink, kind and native type', () => {
+    const dispatcher = new AutoTrackDispatcher()
+    const emit = vi.fn(() => true)
+    for (const dataset of [{ title: 'A' }, { title: 'B' }, { title: 'B', index: 1 }, { title: 'B', index: 1, src: '/docs' }]) {
+      expect(dispatcher.dispatch(click, { ...event(), currentTarget: { id: 'buy', dataset } }, 'home', emit)).toBe(true)
     }
-    expect(dispatchAutoTrack({ schemaVersion: 1, kind: 'change', xpath: '/input[1]' }, nativeEvent)).toBe(true)
-    expect(captured).toStrictEqual({
-      schemaVersion: 1, kind: 'change', xpath: '/input[1]', ignored: false, trackValue: true, sensitive: false,
-      textValue: false, index: 0, hyperlink: '/detail',
-    })
-    expect(dispatchAutoTrack({ schemaVersion: 1, kind: 'click', xpath: '/view[1]' }, { currentTarget: { type: 'password', dataset: {} } })).toBe(true)
-    expect(captured).toMatchObject({ kind: 'click', sensitive: true })
+    expect(dispatcher.dispatch({ ...click, kind: 'change', elementType: 'input', trackValue: true }, { ...event(), detail: { value: false } }, 'home', emit)).toBe(true)
+    expect(emit).toHaveBeenCalledTimes(5)
+  })
+  it('does not deduplicate rejected private probes, failed downstream dispatches, or other trackers', () => {
+    const dispatcher = new AutoTrackDispatcher()
+    const native = event()
+    const emit = vi.fn().mockReturnValueOnce(false).mockReturnValue(true)
+    expect(dispatcher.dispatch({ ...click, ignored: true }, native, 'home', emit)).toBe(false)
+    expect(dispatcher.dispatch(click, native, null, emit)).toBe(false)
+    expect(emit).not.toHaveBeenCalled()
+    expect(dispatcher.dispatch(click, native, 'home', emit)).toBe(false)
+    expect(dispatcher.dispatch(click, native, 'home', emit)).toBe(true)
+    expect(new AutoTrackDispatcher().dispatch(click, native, 'home', emit)).toBe(true)
   })
 })

@@ -25,8 +25,15 @@ async function main(): Promise<void> {
     throw new Error('release_package_metadata_invalid')
   }
   if (JSON.stringify(packageJson.exports) !== JSON.stringify({ '.': './index.ts', './vite': './vite.ts', './autotrack': './autotrack.ts' })) throw new Error('release_exports_invalid')
-  if (typeof packageJson.dependencies !== 'object' || packageJson.dependencies === null || !('@vue/compiler-dom' in packageJson.dependencies)) {
-    throw new Error('release_vite_dependency_missing')
+  const dependencies = packageJson.dependencies as Readonly<Record<string, unknown>> | null
+  const sourcePackage = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8')) as { dependencies: Record<string, string>; devDependencies: Record<string, string> }
+  if (typeof dependencies !== 'object' || dependencies === null
+    || ['@vue/compiler-dom', '@vue/compiler-sfc', '@babel/parser'].some((name) => typeof dependencies[name] !== 'string' || dependencies[name] !== sourcePackage.dependencies[name])) {
+    throw new Error('release_vite_dependency_mismatch')
+  }
+  // HBuilderX 会替换 Vue 内部模块；编译器与本工程 Vue 必须锁定在同一精确版本。
+  if (dependencies['@vue/compiler-sfc'] !== sourcePackage.devDependencies.vue || dependencies['@vue/compiler-dom'] !== sourcePackage.devDependencies.vue) {
+    throw new Error('release_vue_compiler_version_mismatch')
   }
   if ('devDependencies' in packageJson || 'scripts' in packageJson) throw new Error('release_development_metadata_present')
   process.stdout.write(`release_checked:${outputRelative}\n`)

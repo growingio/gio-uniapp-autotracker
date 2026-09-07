@@ -12,6 +12,9 @@ const required = [
   'demo/pages/user/user.vue',
   'demo/pages/lifecycle/lifecycle.vue',
   'demo/pages/autotrack/autotrack.vue',
+  'demo/components/auto-track-script-setup/auto-track-script-setup.vue',
+  'demo/components/auto-track-setup-alias/auto-track-setup-alias.vue',
+  'demo/components/uni-link/uni-link.vue',
   'demo/pages/route/route.vue',
   'demo/pages/datacollect/datacollect.vue',
 ]
@@ -76,10 +79,24 @@ for (const route of ['custom-event', 'user', 'lifecycle', 'autotrack', 'route', 
   if (!pageConfig.pages?.some((page) => page.path === `pages/${route}/${route}`)) throw new Error(`pages.json is missing ${route}`)
 }
 
+const viteConfig = readFileSync(resolve(root, 'demo/vite.config.ts'), 'utf8')
+if (!viteConfig.includes('__GIO_AUTOTRACK_VERIFICATION__: true')) throw new Error('demo must explicitly enable the autotrack verification build')
+
 const autoTrackPage = readFileSync(resolve(root, 'demo/pages/autotrack/autotrack.vue'), 'utf8')
 const transformed = transformAutoTrackSfc(autoTrackPage, '@/uni_modules/gio-uniapp-autotracker/autotrack.js')
-if (!transformed.changed || !transformed.code.includes('dispatchAutoTrack as __gioAutoTrack') || !transformed.code.includes('ignored:true') || !transformed.code.includes('sensitive:true')) {
+if (!transformed.changed || transformed.warnings.length > 0 || !transformed.code.includes('dispatchAutoTrack as gioAutoTrack') || !transformed.code.includes('ignored:&quot;&quot;') || !transformed.code.includes('sensitive:true') || !transformed.code.includes('schemaVersion:2') || !transformed.code.includes('eventName:&quot;openURL&quot;') || transformed.code.includes('xpath:')) {
   throw new Error('auto-track showcase must compile to dispatcher calls that preserve ignore and sensitive markers')
+}
+for (const file of [
+  'demo/components/auto-track-script-setup/auto-track-script-setup.vue',
+  'demo/components/auto-track-setup-alias/auto-track-setup-alias.vue',
+  'demo/components/uni-link/uni-link.vue',
+]) {
+  const result = transformAutoTrackSfc(readFileSync(resolve(root, file), 'utf8'), '@/uni_modules/gio-uniapp-autotracker/autotrack.js')
+  if (!result.changed || result.warnings.length > 0) throw new Error(`auto-track demo component must compile without warnings: ${file}`)
+}
+for (const marker of ['currentTarget 无 id', 'v-if 用例', 'v-show 用例', '<auto-track-script-setup', '<auto-track-setup-alias', 'data-growing-sensitive', '<uni-link']) {
+  if (!autoTrackPage.includes(marker)) throw new Error(`auto-track showcase is missing acceptance case: ${marker}`)
 }
 
 console.log('demo showcase structure is valid')
