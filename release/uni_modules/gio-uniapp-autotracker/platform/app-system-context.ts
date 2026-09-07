@@ -37,7 +37,7 @@ function dimension(value: unknown): number | null {
 function language(value: unknown): string {
   const source = text(value)
   if (source === '') return 'und'
-  const parts = source.replaceAll('_', '-').split('-')
+  const parts = source.replace(/_/g, '-').split('-')
   const base = parts[0]?.toLowerCase()
   if (base === undefined || !/^[a-z]{2,3}$/.test(base)) return 'und'
   return [base, ...parts.slice(1).map((part) => part.length === 4 ? `${part[0]?.toUpperCase() ?? ''}${part.slice(1).toLowerCase()}` : part.toUpperCase())].join('-')
@@ -46,6 +46,11 @@ function language(value: unknown): string {
 function deviceType(value: unknown): AppSystemContext['deviceType'] {
   const normalized = text(value).toUpperCase()
   return normalized === 'PHONE' || normalized === 'PAD' || normalized === 'FOLD' ? normalized : 'UNKNOWN'
+}
+
+/** Android classifies tablet layouts at a 600dp shortest edge. */
+function androidDeviceType(screenWidth: number): AppSystemContext['deviceType'] {
+  return screenWidth > 0 ? (screenWidth >= 600 ? 'PAD' : 'PHONE') : 'UNKNOWN'
 }
 
 /** Converts standard uni system reads to protocol-ready App context without exposing raw host objects. */
@@ -70,9 +75,9 @@ export class AppSystemContextPort implements SystemContextPort {
       networkState: 'UNKNOWN',
       screenWidth: width === 0 || height === 0 ? 0 : Math.min(width, height),
       screenHeight: width === 0 || height === 0 ? 0 : Math.max(width, height),
-      deviceBrand: text(device.brand, 'UNKNOWN'),
-      deviceModel: text(device.model, 'UNKNOWN'),
-      deviceType: deviceType(device.deviceType),
+      deviceBrand: text(device.deviceBrand ?? device.brand ?? system.deviceBrand ?? system.brand, 'UNKNOWN'),
+      deviceModel: text(device.deviceModel ?? device.model ?? system.deviceModel ?? system.model, 'UNKNOWN'),
+      deviceType: targetPlatform === 'Android' ? androidDeviceType(Math.min(width, height)) : deviceType(device.deviceType),
       appVersion: text(app.version, this.appVersionFallback ?? ''),
       language: language(app.appLanguage ?? app.language),
       sdkVersion: this.sdkVersion,

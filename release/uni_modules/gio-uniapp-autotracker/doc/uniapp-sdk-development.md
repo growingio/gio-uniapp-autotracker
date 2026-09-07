@@ -20,7 +20,7 @@ found=23856 bad=1
 
 把 SDK 做成一台运行在传统 uni-app Vue 应用内的“事件记录器”：
 
-1. 由 `App.vue` 和 Page 生命周期建立访问、会话和页面上下文；
+1. 由 SDK 在 `main.ts` 初始化时安装的全局 Vue mixin 接管 App / Page 生命周期，建立访问、会话和页面上下文；
 2. 由 Vue 3/Vite 的**模板编译插桩**记录点击和变更，不依赖 DOM；
 3. 由纯 TS/JS core 构建事件、管理身份、缓存和上传；
 4. 一期由基于 `uni.request` 的 App 请求适配器和 `uni.storage` 完成基础能力；core 只依赖标准请求端口；
@@ -102,7 +102,7 @@ found=23856 bad=1
 
 | 现有实现 | 不能直接复用的原因 | 新 SDK 的处理 |
 |---|---|---|
-| 小程序 `App/Page/Component` hook | 传统 uni-app 是 Vue 运行时与编译产物，不应盲目重写所有宿主构造器 | 使用 `App.vue`、页面 mixin/桥接和 Vite 插桩 |
+| 小程序 `App/Page/Component` hook | 传统 uni-app 是 Vue 运行时与编译产物，不应盲目重写所有宿主构造器 | SDK 在 `main.ts` 安装全局 Vue mixin 接管生命周期，并使用 Vite 插桩 |
 | Web DOM 事件委托 | App Vue / nvue 不能把 DOM 当作通用事件源 | 以模板插桩为主；H5 后续另做 DOM 增强 |
 | uni-app x UTS core | X 的主链是 UTS/uvue，传统 uni-app 主链是 JS/Vue | 复用事件语义和算法，重写 TS 运行时与 bridge |
 | X 的 Vite 插桩器 | 可作为 Vue3 思路和测试样例，但其输出面向 uvue/UTS | 产出传统 Vue 事件调用协议 |
@@ -180,7 +180,7 @@ gio-uniapp-autotracker/
 
 - API 采用 TS/JS，不要求业务侧会写 UTS；
 - 所有配置在 `init()` 一次性归一化，不在深层逻辑猜测类型；
-- 一期不支持多实例：同一 JS 运行期内 `createGioTracker(host, options)` 首次创建模块单例，后续调用返回同一 tracker，绝不重复创建队列、storage namespace 或生命周期监听；
+- 一期不支持多实例：同一 JS 运行期内首次 `gdp('init', ...)` 创建内部单例，后续初始化直接返回 `false`，绝不重复创建队列、storage namespace 或生命周期监听；
 - `dataCollect` 默认 `true`，与 Android、iOS 和小程序 SDK 一致；需要等待隐私同意的业务必须在 `init()` 中显式传 `false`，再在同意后开启；
 - 所有对象跨 UTS 边界时先裁成无函数、无循环引用的 JSON 快照；
 - 首次成功 `init()` 后，重复 `init()` 必须直接失败，不能静默创建多个上报器；一期不提供 `destroy()` 或成功实例的重新初始化；
@@ -189,7 +189,7 @@ gio-uniapp-autotracker/
 ### 5.2 推荐接口
 
 ```ts
-import type { Plugin as VuePlugin } from 'vue'
+import type { App as VueApp } from 'vue'
 
 // 业务侧输入：accountId、dataSourceId 必传；serverUrl 省略时使用默认采集地址。
 // appId 为跨端预留输入，当前 App profile 不消费它；其余由 config.ts 归一化。
@@ -219,36 +219,65 @@ type ResolvedGioConfig = Omit<Required<GioInitOptions>, 'appId' | 'appVersion' |
   sessionPolicy: SessionPolicy
 }
 
-export type TrackAttributeScalar = string | number | boolean | Date | null | undefined
-export type TrackAttributeValue = TrackAttributeScalar | TrackAttributeScalar[]
-export type TrackProperties = Record<string, TrackAttributeValue>
+export type GioAttributeScalar = string | number | boolean | Date | null | undefined
+export type GioAttributeValue = GioAttributeScalar | readonly GioAttributeScalar[]
+export type GioAttributes = Readonly<Record<string, GioAttributeValue>>
+export type GioMutableOptions = Readonly<{ dataCollect: boolean }>
 
-export interface GioUniAppTracker {
+// SDK internal tracker: it is never exported to application code.
+interface InternalGioUniAppTracker {
   init(options: GioInitOptions): boolean
-  track(eventName: string, properties?: TrackProperties): boolean
+  track(eventName: string, properties?: GioAttributes): boolean
   setUserId(userId: string, userKey?: string | null): boolean
   clearUserId(): boolean
-  setUserAttributes(attributes: TrackProperties): boolean
-  setOptions(options: Pick<GioInitOptions, 'dataCollect'>): boolean
+  setUserAttributes(attributes: GioAttributes): boolean
+  setOptions(options: GioMutableOptions): boolean
   setLocation(latitude: number, longitude: number): boolean
   clearLocation(): boolean
   registerPlugins(...plugins: GioBuiltinPlugin[]): boolean
 
-  // 由 App.vue / installGioLifecycle 调用；不作为普通业务埋点 API 宣传
+  // 由 SDK 全局 lifecycle mixin 调用；不作为普通业务埋点 API 宣传
   onAppLaunch(options: unknown): boolean
   onAppShow(options: unknown): boolean
   onAppHide(): boolean
 }
 
-export function createGioTracker(host: AppRuntimeHost, options: AppRuntimeOptions): GioUniAppTracker
-export function createGioVueRuntime(tracker: GioUniAppTracker): GioVueRuntime
+export type GioGdpInitOptions = Omit<GioInitOptions, 'accountId' | 'dataSourceId'> & {
+  // createSSRApp(App) 返回的应用实例；SDK 据此安装生命周期 mixin。
+  uniVue: VueApp
+  sdkVersion?: string
+}
+
+export type GioPluginRuntime = InternalGioUniAppTracker
+
+export type GioPlugin = {
+  name: string
+  // The only intentional internal-instance handoff: explicit customer plugins receive it here.
+  install(growingio: GioPluginRuntime): void
+}
+
+export type GioPluginRegistration = GioBuiltinPlugin | GioPlugin
+
+export interface GdpCommand {
+  (command: 'registerPlugins', plugins: readonly GioPluginRegistration[]): boolean
+  (command: 'init', accountId: string, dataSourceId: string, options: GioGdpInitOptions): boolean
+  (command: 'track', eventName: string, attributes?: GioAttributes): boolean
+  (command: 'setUserId', userId: string, userKey?: string | null): boolean
+  (command: 'clearUserId'): boolean
+  (command: 'setUserAttributes', attributes: GioAttributes): boolean
+  (command: 'setOptions', options: GioMutableOptions): boolean
+  (command: 'setLocation', latitude: number, longitude: number): boolean
+  (command: 'clearLocation'): boolean
+}
+
+export const gdp: GdpCommand
 ```
 
-`createGioTracker(host, options)` 是单例获取入口而不是多实例工厂：同一 JS 运行期内首次调用创建 tracker，后续调用返回同一引用。`host` 是 `uni` 宿主适配对象，`options` 提供 SDK 版本、稳定 deviceId/sessionId 工厂等运行期依赖；实例尚未成功初始化时可以先声明插件、修正配置后重试 `init()`；首次成功后仍只有这一实例，重复 `init()` 不会重建任何状态。`createGioVueRuntime(gio)` 是轻量 Vue 安装器，将同一 tracker 公开为 Options API 的 `$gio`，不创建第二个 runtime。
+`gdp()` 与小程序 SDK 使用同一命令式接入形态：先注册插件，再初始化。业务侧只传账户、数据源、采集配置和 `createSSRApp(App)` 得到的 `uniVue`。SDK 自己读取全局 `uni`、创建内部 tracker 与全局 Vue mixin；业务 `App.vue` 和页面不必引入 bridge。`deviceId` 由 SDK 首次启动生成并以 SDK storage namespace 持久化；`sessionId` 也由 SDK 自己按首次访问、超时、用户切换和恢复采集等会话边界创建。宿主对象、device/session ID 工厂都是内部依赖，绝不要求客户传入。
 
 `core/config.ts` 是唯一允许读取 `GioInitOptions` 的位置：`accountId`、`dataSourceId` 必须是非空字符串；`serverUrl` 未传时固定补为 `https://napi.growingio.com`，传入时 trim、仅域名自动补 `https://`、去掉末尾 `/`，且必须是有效 HTTP(S) **基础地址**，不得传入既有接口路径或 query。必填项或显式地址非法时，`init()` 返回 `false` 并记录受控诊断：不创建实例、不读写 SDK storage、不采集；接入方修正配置后可再次主动调用 `init()`。首次成功后，后续 `init()` 返回 `false` 并记录 `already_initialized`，原实例不变。`appId` 是保留的跨端输入：当前 App profile 接受但在此边界直接剥离，不校验其内容、不写入 `ResolvedGioConfig`、storage、日志或采集报文，也绝不用于覆盖 App `domain`；未来 Web / 小程序 profile 才各自定义并消费它。`appChannel` 是 App 三端完全一致的可选 init 字段：非空字符串 trim 后写为 `ResolvedGioConfig.appChannel`，未传或空白时为 `null`；不读取 `uni.getAppBaseInfo().channel` 等平台专属渠道，也不做端侧猜测。它是 init 期固定值，`setOptions()` 不得修改，也不写 storage。`urlScheme` 不属于基础 init：一期没有 Deep Link 或圈选插件，基础 SDK 不读取、存储或上报它；以后只能由相应插件的专属配置提供。`dataCollect` 默认 `true`，`idMapping`、`debug` 默认 `false`，三者都是 init 输入；只有 `dataCollect` 可由 `setOptions()` 在运行时改变。`sessionExpires` 与 Web SDK 同名、同单位，单位为分钟：必须是大于 `0` 的有限数，允许小数；传入 `0`、负数、NaN、Infinity 或非数字时 `init()` 失败。未传时由 profile 补默认值，App 为 `0.5`（30 秒）、Web 为 `30`、小程序为 `5`。它不支持 `setOptions()` 热修改。请求超时 5000ms、队列上限 200、满 20 条或 5000ms 尝试发送仍是内部固定策略。`appVersion` 是用户可选的 fallback：非空时归一化为 `appVersionFallback`，不是最终上报值。其余 core 模块、平台适配器和插件不得再对可选字段各自补默认值。
 
-调用顺序也固定：创建 tracker 后，只有 `registerPlugins()` 可在 `init()` 前声明内置插件；`track()`、身份、属性、位置和其他业务 API 一律返回 `false` 并记录 `not_initialized`，不缓存。首次 `init()` 返回 `true` 后，tracker 可短暂处于 `initializing`，该期间发生的事件才进入 bootstrap buffer，待 identity、session 和 SystemContext 完成后按发生顺序构建。这样既保留独立 SDK 的“插件先声明、初始化时统一安装”语义，也不会丢失合法初始化后的首屏事件。
+调用顺序也固定：先 `gdp('registerPlugins', ...)`，再 `gdp('init', ...)`。业务侧所有事件、身份、属性和位置操作都只能通过 `gdp('xxx')`；SDK 不向页面暴露 tracker 或 `$gio`。只有客户显式注册的插件在 `install(growingio)` 中得到内部实例。首次 `init()` 返回 `true` 后，tracker 可短暂处于 `initializing`，该期间发生的事件才进入 bootstrap buffer，待 identity、session 和 SystemContext 完成后按发生顺序构建。这样既保留独立 SDK 的“插件先声明、初始化时统一安装”语义，也不会丢失合法初始化后的首屏事件。
 
 一期每次真实 `Page:onShow` 都自动发送 `PAGE`，并始终维护页面快照供 CUSTOM / `VIEW_*` 使用；不提供 `trackPage` 开关或 `sendPage()` 手动 PAGE，避免与 uniappx 一期能力分叉。
 
@@ -256,12 +285,17 @@ export function createGioVueRuntime(tracker: GioUniAppTracker): GioVueRuntime
 
 ### 5.3 一期内置插件入口
 
-一期只提供与 uniappx 当前实现同级的内置插件入口，不交付可由任意第三方调用的通用 hook、capability、插件 storage 或产品服务 request 体系。`registerPlugins()` 必须在首次 `init()` 前调用：它仅在内存中声明插件，不读写 SDK storage、不安装 Vue hook；`init()` 参数校验成功后再按声明顺序统一安装。当前 App 一期仅接受 uniappx 同名的 `gioEventAutoTracking`，未识别或重复名称返回 `false`，不安装部分功能。配置非法导致 `init()` 失败时，已声明插件保留，接入方修正配置后重试无需重复注册；首次 `init()` 成功后注册窗口关闭。无埋点插件安装失败时基础采集继续可用；它不取得 tracker、queue、storage、request 或原始身份值。
+一期内置插件使用与 uniappx 同名的 `gioEventAutoTracking`。`registerPlugins()` 必须在首次 `init()` 前调用：它仅在内存中声明插件，不读写 SDK storage、不安装 Vue hook；`init()` 参数校验成功后再按声明顺序统一安装。内置插件名无效或任意插件重名时返回 `false`，不安装部分功能。配置非法导致 `init()` 失败时，已声明插件保留，接入方修正配置后重试无需重复注册；首次 `init()` 成功后注册窗口关闭。客户插件可以定义 `{ name, install(growingio) }`；这是唯一可取得内部 tracker 的路径，且安装异常会隔离，不影响基础初始化。业务页面、`App.vue` 和全局变量均不获得该实例。
 
 ```ts
 type GioBuiltinPlugin = {
   name: 'gioEventAutoTracking'
   options?: Record<string, never>
+}
+
+type GioPlugin = {
+  name: string
+  install(growingio: InternalGioUniAppTracker): void
 }
 ```
 
@@ -276,10 +310,10 @@ type GioBuiltinPlugin = {
 | 产品插件 | 无埋点、ABTest、圈选、分享、性能等可选产品能力；可选接入 Vue runtime | 是 |
 | 平台适配器 | request、storage、network、system 的端侧实现 | 否，属于 `platform/` 并实现 ports |
 | 无埋点 Vite 伴随插件 | 编译期把 `.vue` 模板改写为 `dispatchAutoTrack()` 调用；它只安装探针，属于无埋点插件的构建侧 | 否，不参与 runtime hook registry |
-| Vue runtime carrier | `createGioVueRuntime(tracker)` 作为 `app.use()` 的统一载体，依序安装已注册插件的 `installVue` | 否；它不另建插件体系 |
+| Vue runtime carrier | SDK 在 `gdp('init')` 内部安装生命周期 mixin | 否；它不另建插件体系 |
 | UTS 原生增强 | 可选的原生信息或能力 | 否，属于 `utssdk/`，只能通过 capability port 暴露 |
 
-小程序 SDK 当前通过全局 emitter 同步广播 `onInstall`、`onError`、`onComposeBefore/After`、`onSendBefore/After`；Web 也允许运行时安装/卸载插件。新 SDK 保留这些阶段所代表的业务时机，但不把可变 emitter、tracker、uploader 或宿主对象交给插件。任何一个插件都不应绕过 `dataCollect`、篡改 Measurement Protocol，或因异步/异常卡住基础采集。
+小程序 SDK 当前通过全局 emitter 同步广播 `onInstall`、`onError`、`onComposeBefore/After`、`onSendBefore/After`；Web 也允许运行时安装/卸载插件。新 SDK 不把可变 emitter、uploader 或宿主对象交给插件；仅显式注册的客户插件会在同步 `install(growingio)` 中拿到内部 tracker，页面和全局变量仍不可取得它。任何一个插件都不应绕过 `dataCollect`、篡改 Measurement Protocol，或因异步/异常卡住基础采集。
 
 二期通用插件的注册规则如下：
 
@@ -287,7 +321,7 @@ type GioBuiltinPlugin = {
 2. `init()` 会按注册顺序同步执行 `setup()`；某插件安装失败只记录 `plugin_setup_failed`，不影响 core 和其他插件。
 3. 初始化完成后不支持热插拔。此后 `registerPlugins()` 返回 `false` 并记录 `plugin_registration_closed`；`destroy()` 时按注册的逆序调用 `dispose()`，随后才能重新注册并 `init()`。
 4. 二期可将 `gioEventAutoTracking` 迁移到这一通用契约；它必须和 `gioUniappAutoTrack()` Vite 伴随插件一起接入才启用 click/change。
-5. 需要 Vue 运行时能力的插件必须在 `app.use(createGioVueRuntime(gio))` 时安装；它与 core `setup()` 共享同一 plugin ID、顺序、错误隔离和 destroy 生命周期，不能另建一份 Vue 插件注册表。
+5. 需要 Vue 运行时能力的插件必须在 `gdp('init')` 内部安装生命周期 mixin 时一并安装；它与 core `setup()` 共享同一 plugin ID、顺序、错误隔离和 destroy 生命周期，不能另建一份 Vue 插件注册表。
 
 ```ts
 type PluginEvent = Readonly<ProtocolEvent>
@@ -390,50 +424,26 @@ interface PluginHooks {
 
 ```ts
 // main.ts
-import {
-  createGioTracker,
-  createGioVueRuntime,
-} from 'gio-uniapp-autotracker'
-import type { App } from 'vue'
+import { createSSRApp } from 'vue'
+import App from './App.vue'
+import gdp from 'gio-uniapp-autotracker'
 
-const gio = createGioTracker(uni, {
-  sdkVersion: '0.1.0',
-  deviceIdFactory: () => 'stable-device-id',
-  sessionIdFactory: () => 'session-id',
-})
-
-export function bootstrapAnalytics(app: App) {
-  gio.registerPlugins({ name: 'gioEventAutoTracking' })
-  const initialized = gio.init({
-    accountId: 'account-id',
-    dataSourceId: 'data-source-id',
+export function createApp() {
+  const app = createSSRApp(App)
+  gdp('registerPlugins', [{ name: 'gioEventAutoTracking' }])
+  gdp('init', 'account-id', 'data-source-id', {
+    uniVue: app,
     serverUrl: 'https://collector.example.com',
     appVersion: '1.0.0',
     dataCollect: true,
     idMapping: false,
     debug: false,
   })
-  if (initialized) {
-    app.use(createGioVueRuntime(gio))
-  }
+  return { app }
 }
-
-export { gio }
 ```
 
-```vue
-<!-- App.vue：应用生命周期只能在这里捕捉 -->
-<script setup lang="ts">
-import { gio } from './analytics'
-import { onLaunch, onShow, onHide } from '@dcloudio/uni-app'
-
-onLaunch((options) => gio.onAppLaunch(options))
-onShow((options) => gio.onAppShow(options))
-onHide(() => gio.onAppHide())
-</script>
-```
-
-项目采用 Options API 时，SDK 也必须提供等价安装方式；不能强制业务迁移到 Composition API。`App.vue` 没有模板，且页面中监听应用生命周期无效，这是 SDK 安装设计的硬约束。[App.vue](https://uniapp.dcloud.net.cn/collocation/App.html)
+接入不再要求修改 `App.vue` 或任何页面：SDK 通过初始化时安装的全局 mixin 捕捉真实生命周期。业务 API 统一调用 `gdp('xxx')`，不会以 `$gio` 或 tracker 形式挂到页面上；该机制同时适用于 Options API 与 Composition API，不要求业务迁移写法。[App.vue](https://uniapp.dcloud.net.cn/collocation/App.html)
 
 ---
 
@@ -443,8 +453,8 @@ onHide(() => gio.onAppHide())
 
 | uni-app 时机 | SDK 操作 | 必须避免 |
 |---|---|---|
-| `App.vue:onLaunch` | 记录启动参数快照、初始化系统上下文；不发重复 VISIT | 读取尚未稳定的页面实例 |
-| `App.vue:onShow` | 计算新/续 session；必要时发 `VISIT`；恢复网络监听 | 页面事件替代 App 事件 |
+| `App.vue:onLaunch` | 标记新的 App JS 运行期并记录启动参数快照；不直接发事件 | 读取尚未稳定的页面实例 |
+| `App.vue:onShow` | 新运行期强制创建 session 并发 `VISIT`；无新 `onLaunch` 时才按后台超时续接 | 页面事件替代 App 事件 |
 | `Page:onLoad` | 复制 query 并绑定到页面实例/唯一 page key | 以后从可变页面对象回读 query |
 | `Page:onShow` | 解析 route/title/referral，记录 pageShowTimestamp；自动发 `PAGE` | 全局 50ms 去重误吞不同页面 |
 | `Page:onHide` | 标记页面非当前；不发 `APP_CLOSED` | 认为页面隐藏就是应用进入后台 |
@@ -455,12 +465,12 @@ onHide(() => gio.onAppHide())
 
 一期 App 的“新访问”只在以下情况发生：
 
-1. 首次启动，尚无 `lastCloseTime`；
-2. 从后台返回，距上次 `onHide` 超过当前 profile 的固定时长；
+1. 每次 `App:onLaunch` 标识出的新 App JS 运行期（包括用户杀进程后重启）；
+2. 同一运行期从后台返回，距上次 `onHide` 超过当前 profile 的固定时长；
 3. 已登录用户从 A 切换为不同的已登录用户 B；
 4. `dataCollect` 从 `false` 恢复为 `true`。
 
-session core 只比较 `lastCloseTime` 与当前时间，不读取平台名称；profile 提供默认值，`init({ sessionExpires })` 可统一覆盖。该字段与 Web SDK 同名、同为分钟单位：App（Android/iOS/HarmonyOS）默认 **0.5 分钟（30 秒）**，Web profile 默认 **30 分钟**，小程序 profile 默认 **5 分钟**。一期仅交付 App profile；其余两项是未来 profile 的已定默认值，不属于 App 的降级或兼容分支。Android/iOS/HarmonyOS 独立 SDK 虽使用秒单位的 `sessionInterval`，但传统 uni-app 在对外 API 边界统一采用 Web 的 `sessionExpires`，随后一次换算为 core 毫秒策略。未来小程序若要兼容既有 `keepAlive`（分钟）入口，只能在小程序 profile 的接入边界映射为统一的 `sessionExpires`，不得把别名带进 core。为让 `0.5` 能在全端表达，Web profile 接入时必须保留正的小数分钟值，不能沿用现有 Web 实现“取整且最小 1 分钟”的旧 normalizer。App 不沿用小程序“场景值变化即新访问”的规则。使用默认 App 值时，30 秒内从不同 Deep Link、分享或入口 query 回到 App 不新建 session、不补 `VISIT`；后续页面只按自身 `onLoad` 的 query 建快照。
+`App:onLaunch` 是 App 冷启动边界：它出现时即使持久化的 `lastCloseTime` 距今不足 30 秒，也必须替换 session 并在紧随的 `onShow` 发 `VISIT`。只有没有新的 `onLaunch` 的后台恢复才比较 `lastCloseTime` 与当前时间。profile 提供默认值，`init({ sessionExpires })` 可统一覆盖。该字段与 Web SDK 同名、同为分钟单位：App（Android/iOS/HarmonyOS）默认 **0.5 分钟（30 秒）**，Web profile 默认 **30 分钟**，小程序 profile 默认 **5 分钟**。一期仅交付 App profile；其余两项是未来 profile 的已定默认值，不属于 App 的降级或兼容分支。Android/iOS/HarmonyOS 独立 SDK 虽使用秒单位的 `sessionInterval`，但传统 uni-app 在对外 API 边界统一采用 Web 的 `sessionExpires`，随后一次换算为 core 毫秒策略。未来小程序若要兼容既有 `keepAlive`（分钟）入口，只能在小程序 profile 的接入边界映射为统一的 `sessionExpires`，不得把别名带进 core。为让 `0.5` 能在全端表达，Web profile 接入时必须保留正的小数分钟值，不能沿用现有 Web 实现“取整且最小 1 分钟”的旧 normalizer。App 不沿用小程序“场景值变化即新访问”的规则。使用默认 App 值时，30 秒内从不同 Deep Link、分享或入口 query 回到 App 不新建 session、不补 `VISIT`；后续页面只按自身 `onLoad` 的 query 建快照。
 
 ```ts
 const appSessionPolicy: SessionPolicy = { timeoutMs: 30 * 1000 }
@@ -508,6 +518,8 @@ type PageSnapshot = {
 
 ## 7. 无埋点设计
 
+> **实施口径：**本节保留无埋点的架构边界。普通模板 `xpath`、事件名推导、schema v2、tabBar、`uni-link`、隐私、去重、迁移和验收细节以[传统 uni-app 无埋点方案](./uniapp-autotrack-design.md)为准；该方案优先于本节中任何较早的结构路径或旧 `AutoTrackCall` 示例。
+
 ### 7.1 为什么必须编译期插桩
 
 传统 uni-app App 的 `.vue` 页面在 App 端使用 webview，`.nvue` 使用原生渲染；同一路由若两种文件并存，App 优先使用 `.nvue`，非 App 使用 `.vue`。[页面渲染规则](https://uniapp.dcloud.net.cn/tutorial/page.html)
@@ -523,9 +535,9 @@ type PageSnapshot = {
   → gioUniappAutoTrack() 读取 template AST、保留原 handler/modifier
   → 仅注入 dispatchAutoTrack(AutoTrackCall) 调用
   → 原业务 handler（始终仍执行一次）
-App runtime construction
-  → createGioTracker() 创建 App runtime 并安装唯一 dispatcher target
-  → createGioVueRuntime() 仅按需将同一 tracker 暴露为 Options API 的 $gio
+gdp('init') runtime construction
+  → SDK 创建内部 App runtime 并安装唯一 dispatcher target
+  → SDK 安装生命周期 mixin；业务侧仍只经 gdp 命令调用
   → runtime/autotrack-dispatch.ts 查找已就绪的 gioEventAutoTracking
   → 插件：页面快照 + currentTarget 元数据 + ignore/敏感规则 + normalizer + 去重
   → core 内部无埋点入口
@@ -535,51 +547,24 @@ App runtime construction
 
 `gioUniappAutoTrack()` 不直接构建 `VIEW_CLICK` / `VIEW_CHANGE`、不保存事件、也不发请求；`gioEventAutoTracking` 不解析 `.vue` 源码。两者只能通过同一份 `autotrack/contract.ts` 交互，`schemaVersion` 不匹配时 dispatcher 返回 `false`、记录兼容性诊断且不采集。
 
-无埋点接入顺序固定为“创建 tracker → 注册 `gioEventAutoTracking` → `init()` → `app.use(createGioVueRuntime(gio))` → Vue 挂载”。插件先声明、由初始化统一安装，和独立 SDK 的配置/初始化语义一致；Vite 配置和应用入口分属构建与运行时，不能靠全局变量相互猜测：
+无埋点接入顺序固定为“创建 app → 注册 `gioEventAutoTracking` → `gdp('init', ..., { uniVue: app })` → Vue 挂载”。插件先声明、由初始化统一安装，和独立 SDK 的配置/初始化语义一致；Vite 配置和应用入口分属构建与运行时，不能靠全局变量相互猜测：
 
 ```ts
 // main.ts
-import {
-  createGioTracker,
-  createGioVueRuntime,
-} from 'gio-uniapp-autotracker'
+import gdp from 'gio-uniapp-autotracker'
 
-const gio = createGioTracker(uni, {
-  sdkVersion: '0.1.0',
-  deviceIdFactory: () => 'stable-device-id',
-  sessionIdFactory: () => 'session-id',
-})
-gio.registerPlugins({ name: 'gioEventAutoTracking' })
-if (gio.init(options)) {
-  app.use(createGioVueRuntime(gio))
-}
+gdp('registerPlugins', [{ name: 'gioEventAutoTracking' }])
+gdp('init', 'account-id', 'data-source-id', { ...options, uniVue: app })
 ```
 
-Vite 插件不得直接构建网络事件，它只调用 runtime 的稳定协议：
+Vite 插件不得直接构建网络事件，它只调用 runtime 的稳定 schema v2 协议。内部类型不在本架构文档复制第二份，以[无埋点方案的版本化 call 合约](./uniapp-autotrack-design.md#32-版本化-call-合约)为唯一来源。其边界固定为：
 
-```ts
-type AutoTrackAction = 'click' | 'change'
+- template probe 传 `eventName`、白名单 change 的 `elementType`/picker range，以及允许的模板 metadata；不传结构 xpath；change 的受限值由 dispatcher 从第二参数 native event 即时裁出；
+- tabBar probe 传固定 `#onTabItemTap`、一基 index、text 和 pagePath；
+- 原始 native event 仅作为 `dispatchAutoTrack(probe, nativeEvent)` 的瞬时参数，不写入 probe、日志、队列或协议；
+- normalizer 完成隐私判断、`id#eventName`、组件值归一和去重后，才把纯 JSON 的 `NormalizedAutoTrackCall` 交给 `EventDispatcher`。
 
-type AutoTrackCall = {
-  schemaVersion: 1
-  action: AutoTrackAction
-  nativeEvent: unknown
-  source: 'template' | 'tabbar'
-  component: string | null
-  element: {
-    id: string | number | null
-    index: string | number | null
-    title: string | number | boolean | null
-    src: string | number | boolean | null
-    growingTrack: boolean | null
-    growingIgnore: boolean | null
-  }
-}
-
-dispatchAutoTrack(call: AutoTrackCall): boolean
-```
-
-`dispatchAutoTrack()` 是 dispatcher 对 `gioEventAutoTracking` 的唯一入口：插件未注册、尚未 ready、`dataCollect=false`、页面快照不存在、call 不合法、元素被忽略/敏感或被去重时都返回 `false`，不抛异常、不影响业务 handler。只有插件 normalizer 确认得到可上报动作后，才调用 core 的受限内部入口；core 仍是唯一能把它变成协议 `VIEW_*` 事件的一层。
+`dispatchAutoTrack()` 是 dispatcher 对 `gioEventAutoTracking` 的唯一入口：插件未注册、尚未 ready、`dataCollect=false`、页面快照不存在、schema 不匹配、元素被忽略/敏感或被去重时都返回 `false`，不抛异常、不影响业务 handler。只有插件 normalizer 确认得到可上报动作后，才调用 core 的受限内部入口；core 仍是唯一能把它变成协议 `VIEW_*` 事件的一层。
 
 `runtime/autotrack-dispatch.ts` 只保存当前 tracker 的模块内 gateway，不挂到 `globalThis`、Vue app 或 `uni` 对象。`gioEventAutoTracking` 成功安装后以实例 token attach gateway；一期没有 destroy/re-init，重复 init 直接失败。未来若支持多实例或完整销毁，必须在 `AutoTrackCall` 中新增显式 tracker key，不能按全局“最后初始化者”猜测。
 
@@ -587,29 +572,15 @@ dispatchAutoTrack(call: AutoTrackCall): boolean
 
 ### 7.3 click 支持规则
 
-一期支持的可采集行为：
+一期支持白名单内置组件上没有修饰符的静态 `@click`、`@tap`，以及 `uni-link` 和 TabBar。普通元素没有业务 handler 时不凭空添加 listener；只有 `uni-link` 可以按明确宿主语义补充 `openURL` 采集 handler。动态事件名、自定义组件、计算成员/复杂表达式和带 `.stop`、`.prevent`、`.once`、`.capture`、`.self` 等修饰符的 listener 均保持原代码、不插桩并输出构建告警。
 
-- 内置组件上的 `@click`、`@tap`，以及经能力表确认的别名；
-- `uni-link` / 明确可导航组件的点击；
-- TabBar 的 `onTabItemTap`；
-- 未写业务 handler 的可点击元素，插入只采集的 handler；
-- 已写 handler 的元素，在不改变原语义的前提下**先同步采集快照、后执行业务 handler**。
+对可安全插桩的 handler，必须按纯方法引用、内联调用、箭头/函数表达式和顶层条件表达式分别生成代码，保证原 handler 只执行一次，`$event`、参数、返回值、抛错与求值次数不变。Options API、普通 `setup()` 与 `<script setup>` 的事件名口径相同，但 import 注入、模板绑定和 Ref 自动解包必须分别验证；完整改写矩阵以[无埋点方案](./uniapp-autotrack-design.md#41-推导规则)为准。
 
-插桩器必须保持以下业务语义：
-
-1. 原 handler 只执行一次；
-2. 纯方法引用原本是否接收 `$event`，保持不变；
-3. 内联表达式、箭头函数、三元表达式均不改变求值次数；
-4. `.stop`、`.prevent`、`.once`、`.capture`、`.self` 等修饰符保留；
-5. `v-for` 内的动态 `id`、`data-index`、`data-title`、`data-src` 在运行时求值；
-6. handler 抛错时不被 SDK 吞掉；SDK 自身异常也不影响业务 handler；
-7. 事件冒泡可能导致父子都插桩时，元素信息优先取当前插桩节点的 `currentTarget`；以 `pageKey + action + 该节点稳定标识 + 同一次 native event` 去重。不同父子节点是两个显式交互目标时可各上报一次；同一节点被重复 dispatch 时只能上报一次。
-
-编译器注入的调用必须在原 handler 之前执行且永不 await：这样业务 handler 即使立即跳转/销毁页面，自动采集仍使用触发瞬间的 pageKey 和元素元数据。采集侧异常由 dispatcher 吞掉并记诊断；业务 handler 的返回值、抛错、参数个数、修饰符以及调用次数不受影响。
+编译器注入的调用必须在原 handler 之前执行且永不 await：这样业务 handler 即使立即跳转/销毁页面，自动采集仍使用触发瞬间的 pageKey 和元素元数据。采集侧异常由 dispatcher 吞掉并记诊断；业务 handler 的返回值、抛错、参数个数以及调用次数不受影响。带修饰符的 listener 根本不进入这条改写链。
 
 ### 7.4 change 支持规则
 
-`change` 不是单一事件。以下组件及值形态必须独立归一：
+`change` 不是单一事件。Vite 必须把白名单组件类型和 picker range 显式传给 runtime；dispatcher 再从 native event 即时裁出受限快照，不能假设每个 App 端都能从同一条 `event.detail.value` 读取。以下组件及值形态必须独立归一：
 
 | 组件 | 候选事件 | 归一化值 | 默认是否上传值 |
 |---|---|---|---|
@@ -622,9 +593,9 @@ dispatchAutoTrack(call: AutoTrackCall): boolean
 | `picker-view` | `change` | 每列下标或显示值 | 否 |
 | `swiper` | `change` | `current` / `source` | 否；可仅报 `data-title` |
 
-默认值策略是“只记录组件发生变化”，即 `VIEW_CHANGE` 可带 xpath 和组件类型，但 `textValue` 为 `null`。仅当业务显式标记 `data-growing-track` 且组件不属于敏感类别时，才允许采集规范化后的值。
+默认值策略是“只记录组件发生变化”，即 `VIEW_CHANGE` 可带 xpath，但 `elementType` 仅参与内部归一化、不进入协议，`textValue` 默认为 `null`。仅当业务显式标记 `data-growing-track` 且组件不属于敏感类别时，才允许采集规范化后的值。
 
-同一组件的一次输入动作可能依次触发 `confirm`、`change`、`blur`。normalizer 必须基于 `pageKey + 元素稳定标识 + 规范化值 + 原生事件关联信息` 做组件级去重，保证同一变化只进入一次 `VIEW_CHANGE`；不同值的连续修改不能被合并。`0`、`false`、空字符串和空数组是合法变化值，不能因真值判断被丢弃。
+同一 input / textarea 同时声明 `change`、`blur`、`confirm` 时，Vite 按 `change → blur → confirm` 只选择一个完成事件插针，其他业务 handler 保持原样。宿主重复包装同一事件时，再由 runtime 使用“同对象 + 每页元素窄时间窗”两层去重；不同值的连续修改不能被合并。`0`、`false`、空字符串和空数组不能因真值判断导致整条变化事件丢失。
 
 官方 `input` 的 `input`、`blur`、`confirm` 事件和平台支持面不同，不能把一个事件字段读取公式复制到所有组件或端上。[input 组件](https://uniapp.dcloud.net.cn/component/input.html)
 
@@ -637,10 +608,10 @@ dispatchAutoTrack(call: AutoTrackCall): boolean
 | `data-growing-ignore` | 当前元素及其事件绝不采集；优先级最高 |
 | `data-growing-track` | 允许该元素按配置采集可采集值；不覆盖敏感禁止规则 |
 | `data-title` | 点击/允许的变更事件的展示文本 |
-| `data-index` | 列表序号，仅 `VIEW_CLICK` |
+| `data-index` | 列表序号，仅 `VIEW_CLICK`；只接受大于 0 且小于 2147483647 的规范十进制整数 |
 | `data-src` | 链接地址，仅 `VIEW_CLICK` |
 
-强制忽略：静态或可识别为动态的 password / safe-password 输入、验证码、身份证、银行卡、支付、文件内容、富文本 HTML。动态 `:type` 无法在编译期安全确认时，默认当作敏感，不上传值。值还应执行 trim、最大长度（建议 100）、控制字符处理和日志脱敏。
+强制忽略：`data-growing-sensitive`，静态 password / safe-password / file input，以及一期无法可靠确认安全类型的动态 `:type`。这些情况拒绝整个 probe，不产生 `VIEW_CHANGE`；即使存在 `data-growing-track` 也不能覆盖。验证码、身份证、银行卡、支付等业务敏感字段应由业务显式添加 `data-growing-sensitive`。敏感值必须在读取、字符串化和记录去重键之前短路；其他允许采集的值仍执行 trim、最大长度（建议 100）、控制字符处理和日志脱敏。
 
 ### 7.6 HarmonyOS 特殊门槛
 
@@ -680,26 +651,27 @@ dispatchAutoTrack(call: AutoTrackCall): boolean
 
 ### 8.1 xpath / 元素标识
 
-一期不追求浏览器 DOM XPath。采用稳定、跨端、可圈选的逻辑标识：
+一期不追求浏览器 DOM XPath。传统 uni-app Vue 3 模板采用与小程序一致的逻辑标识：
 
 ```text
-{page.route}#{handlerName-or-eventName}#{element.id-or-component}
+{currentTarget || target 的 id}#{实际 handlerName-or-eventName}
 ```
 
-当元素有 `id` 时优先用 id；无 id 时使用插桩器生成的稳定模板位置标识；`v-for` 内使用 `data-index` 作为附加维度，不能把数组下标当成永久节点 ID。标识规则必须版本化，避免发布后圈选配置整体失效。
+主目标存在但没有 id 时 id 为空，结果为 `#eventName`；不得回退为模板位置或子节点 target 的 id。`v-for` 内的 `data-index` 仅是 `VIEW_CLICK.index` 附加维度，不能充当节点 ID，且只接受大于 0 且小于 2147483647 的规范十进制整数。无业务 handler 的 `uni-link` 固定为 `#openURL`，tabBar 固定为 `#onTabItemTap`。完整的版本化契约、推导与迁移规则见[传统 uni-app 无埋点方案](./uniapp-autotrack-design.md)。
 
 ### 8.2 去重
 
-去重键建议为：
+运行时先用 native event 对象身份抑制同一对象上的重复 probe，再用以下键覆盖宿主产生不同 JS 包装对象的情况：
 
 ```text
-pageKey + action + xpath + normalizedValueHash + eventTimestampBucket
+pageKey + nativeEvent.type + action + xpath + textValue + index + hyperlink
 ```
 
-- 只去重同一物理交互的重复回调；
-- 不得用单一全局时间窗去重所有页面；
-- 允许 value 为 `0`、`false`、空字符串，不可当成缺失；
-- 探针提供的交互时刻为零、缺失或不可信时，使用递增调用序列辅助，不能把所有事件合并；这只影响本地去重，不能改写协议 `timestamp`。
+- 只有键完全相同、两个时间戳均为有限正数且绝对差小于 10ms 时才判重；
+- 时间戳为 0、缺失或不可信时跳过时间窗层，不得把后续事件永久合并；
+- 页面切换清空最近事件，不得用单一全局时间窗跨页面去重；
+- 不同父子 currentTarget、不同值或不同事件类型不合并；`0`、`false`、空字符串不能因真值判断导致整条事件丢失；
+- 去重只影响本地判定，不能改写协议 `timestamp`。
 
 ---
 
@@ -970,12 +942,12 @@ export default defineConfig({
 - 静态事件名，以及已验证不会改变原语义的动态 handler 参数；
 - `@click` / `v-on:click` / `@tap`；
 - `@change`、`@blur`、`@confirm`；
-- 原 handler 缺失、纯方法引用、带参数调用、内联表达式，以及经独立业务语义回归的直接箭头 listener、条件选择方法引用；其他复杂嵌套表达式保持原样并输出 build warning；
+- 纯方法引用、带参数调用、内联表达式，以及经独立业务语义回归的直接箭头 listener、条件选择方法引用；其他复杂嵌套表达式保持原样并输出 build warning；
 - `v-for`、`v-if`、slot、动态 attribute；
 - `data-*` 元数据与静态 input type；
 - 对 `uni-link` 等无业务 handler 的组件添加只采集调用。
 
-一期不支持时必须报清晰的 build warning，并保留原业务代码。例如：动态事件名、复杂嵌套表达式、无法静态确认的自定义组件事件。绝不能生成会改变业务 handler 参数/返回值的“半正确”代码。
+SFC block 必须由 `@vue/compiler-sfc` 提取，template 内容再交给 `@vue/compiler-dom`；禁止用正则截取 SFC。普通元素缺失 handler、动态事件名、计算成员、复杂嵌套表达式、自定义组件事件和任何事件修饰符都不在一期范围内，必须报清晰的 build warning 并保留原业务代码。绝不能生成会改变业务 handler 参数/返回值的“半正确”代码。
 
 ### 12.3 改写时序
 
@@ -989,7 +961,7 @@ export default defineConfig({
 }
 ```
 
-对于原始纯方法引用，必须通过 script AST / 签名分析判断是否原本接收 event；无法判断时要选择保守写法或放弃改写并给 warning，不能擅自改变实参个数。
+原始纯方法引用必须显式补回 Vue 原本透传的 `$event` 调用；直接箭头、函数表达式和顶层条件表达式使用各自 wrapper，保证 listener 和条件只求值一次。Options API、普通 `setup()` 与 `<script setup>` 分别验证模板上下文和 Ref 自动解包，不能只验证生成文本看起来相似。
 
 ### 12.4 二期 Vue2 预留
 
@@ -1087,12 +1059,12 @@ type Capability = {
 
 每个 fixture 都做“源码 → 生成代码 → 执行语义”三段断言：
 
-- 无 handler 的 click；
+- 普通元素无 handler 时不插桩并告警；`uni-link` 无 handler 时只补 `openURL` 探针；
 - 普通方法 / 带 event 的方法 / 带业务参数的方法；
 - 内联表达式、箭头函数、三元表达式；
-- 修饰符；
+- 修饰符保持源码、不插桩并产生可定位 warning；
 - `v-for` 动态 dataset；
-- input password 与动态 type；
+- input password、safe-password、file 与动态 type 即使带 `data-growing-track` 也不生成事件；
 - input / textarea / switch / slider / radio / checkbox / picker / picker-view / swiper；
 - 父子嵌套点击、业务 handler throw、异步导航。
 
@@ -1117,8 +1089,8 @@ type Capability = {
 
 日志分两类，口径对齐小程序 SDK：
 
-1. 无论 `debug` 是否开启，参数错误、未初始化调用、配置/插件警告、初始化开始/完成和请求失败均通过统一 `consoleText(message, level)` 输出；level 只允许 `info`、`success`、`warn`、`error`，前缀固定为小程序同款 `[GrowingIO]：`。这是给接入方定位错误的提示，不输出 SDK 内部对象。
-2. `debug: true` 时额外输出热路径：App 生命周期、Page 生命周期、无埋点 action，以及每批发送前的完整待发事件数组。事件数组必须是已执行 Protocol 字段裁剪和 `sanitizeOutboundEvent`、且移除 SDK 内部 `requestId` / `trackingId` 后的 JSON；格式固定为 `console.log('[GrowingIO Debug]:', JSON.stringify(events, null, 2))`。这与小程序 uploader 的调试输出一致。
+1. 无论 `debug` 是否开启，参数错误、未初始化调用、配置/插件警告、初始化开始/完成和请求失败均通过统一 `consoleText(message, level)` 输出；level 只允许 `info`、`success`、`warn`、`error`，前缀固定为 `[GrowingIO]：`。初始化开始/完成的文本明确标识当前产品，依次为 `Gio uni-app SDK 初始化中...`、`Gio uni-app SDK 初始化完成！`；配置失败、运行期初始化失败和重复初始化分别输出对应的中文受控诊断，不输出 SDK 内部对象或状态码。
+2. `debug: true` 时额外输出热路径：App 生命周期格式为 `App: <lifecycle> <timestamp>`，Page 生命周期格式为 `Page: <route> # <lifecycle> <timestamp>`，与小程序 SDK 一致；无埋点 action 也会输出。事件只在 uploader 准备实际发送请求时打印完整待发数组，绝不在入队时打印。事件数组必须是已执行 Protocol 字段裁剪和 `sanitizeOutboundEvent`、且移除 SDK 内部 `requestId` / `trackingId` 后的 JSON；格式固定为 `console.log('[GrowingIO Debug]:', JSON.stringify(events))`，使 iOS 调试基座也完整显示数组的方括号和对象花括号。
 
 `debug` 只改变本地控制台输出，不改变事件、队列、重试、请求或隐私规则；它不支持 `setOptions()` 热修改。由于调试事件数组会包含协议中本来就允许上报的字段（例如 userId、query 或业务显式允许采集的值），接入方不得在生产环境开启，也不得把控制台内容转存或上传为诊断数据。password、验证码、证件、支付、文件等被事件构建拒绝的敏感值，不得因为 debug 出现在日志中。
 
@@ -1172,7 +1144,7 @@ type Capability = {
 
 ### 阶段 B：Vue runtime 与页面（2–3 人日）
 
-- App.vue / page lifecycle bridge；
+- SDK 全局 Vue mixin / page lifecycle bridge；
 - page snapshot、pageKey、session、`VISIT/PAGE/APP_CLOSED`；
 - Android/iOS/Harmony profile 与基础 uni API；
 - demo 冷启动、热启动、导航和后台用例。

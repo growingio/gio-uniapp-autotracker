@@ -123,7 +123,7 @@ SDK 维护一份持久化的全局计数器：`VISIT`、`PAGE`、`CUSTOM`、`VIE
 | `eventSequenceId` | long | ● | ● | ● | 事件请求编号 |
 | `pageShowTimestamp` | long | ● | ● | ● | 页面显示时间 |
 | `textValue` | string | ○ | ○ | ○ | `data-title` 标记的元素文案 |
-| `xpath` | string | ● | ● | ● | xpath 标识符 |
+| `xpath` | string | ● | ● | ● | 元素标识符，不要求是 DOM XPath |
 | `index` | int | ○ | ○ | ○ | `data-index` 标记的列表元素序号 |
 | `hyperlink` | string | ○ | ○ | ○ | `data-src` 标记的目标地址，或 `uni-link` 的 href |
 
@@ -134,9 +134,15 @@ SDK 维护一份持久化的全局计数器：`VISIT`、`PAGE`、`CUSTOM`、`VIE
 | `eventSequenceId` | long | ● | ● | ● | 事件请求编号 |
 | `pageShowTimestamp` | long | ● | ● | ● | 页面显示时间 |
 | `textValue` | string | ○ | ○ | ○ | 标记的组件值，或 swiper 的 `data-title` 文案 |
-| `xpath` | string | ● | ● | ● | xpath 标识符 |
+| `xpath` | string | ● | ● | ● | 元素标识符，不要求是 DOM XPath |
 | `index` | int | — | — | — | `VIEW_CHANGE` 不产生该字段 |
 | `hyperlink` | string | — | — | — | `VIEW_CHANGE` 不产生该字段 |
+
+---
+
+### 3.8 传统 uni-app App 的 `xpath` 口径
+
+传统 uni-app Vue 3 模板无埋点沿用小程序的逻辑元素标识，不生成 DOM 或模板结构 XPath：普通模板事件使用 `${id}#${eventName}`，其中 `id` 来自 `currentTarget || target` 的 `id`，`eventName` 是实际业务 handler 名；缺少 id 时仍保留 `#eventName`。没有业务 click 的 `uni-link` 使用 `#openURL`，tabBar 使用 `#onTabItemTap`。普通模板 `data-index` 只接受大于 0 且小于 2147483647 的整数，tabBar index 单独转为一基。显式敏感标记、password / safe-password / file input 与一期无法确认安全性的动态 input type 会拒绝整个自动采集事件，`data-growing-track` 不能覆盖。`eventName` 仅为 SDK 内部生成 xpath 的输入，不新增为协议字段。详见[传统 uni-app 无埋点方案](./uniapp-autotrack-design.md)。
 
 ---
 

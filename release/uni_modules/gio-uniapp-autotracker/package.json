@@ -12,7 +12,8 @@
   },
   "exports": {
     ".": "./index.ts",
-    "./vite": "./vite.ts"
+    "./vite": "./vite.ts",
+    "./autotrack": "./autotrack.ts"
   },
   "types": "./index.ts"
 }

@@ -5,7 +5,7 @@ export type SessionSnapshot = Readonly<{
   lastCloseTime: number | null
 }>
 
-export type SessionStartReason = 'initial' | 'timeout' | 'user_changed' | 'collection_resumed'
+export type SessionStartReason = 'initial' | 'cold_start' | 'timeout' | 'user_changed' | 'collection_resumed'
 
 export type SessionTransition = Readonly<{
   snapshot: SessionSnapshot | null
@@ -52,6 +52,14 @@ export class SessionManager {
 
   public current(): SessionSnapshot | null {
     return this.snapshot
+  }
+
+  /** A new App JS runtime is a cold start even when a prior session was persisted moments ago. */
+  public onProcessLaunch(): SessionTransition {
+    const reason: SessionStartReason = this.snapshot === null || this.snapshot.sessionId.trim() === ''
+      ? 'initial'
+      : 'cold_start'
+    return this.replace(createSession(this.idFactory, reason))
   }
 
   /** Handles App.onShow. Equality with the timeout continues the same session. */

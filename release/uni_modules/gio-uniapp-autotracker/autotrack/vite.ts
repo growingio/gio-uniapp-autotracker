@@ -231,7 +231,7 @@ export type UniAppAutoTrackViteOptions = Readonly<{
 
 function resolveViteOptions(options: string | UniAppAutoTrackViteOptions | undefined): Readonly<{ enabled: boolean; runtimeImport: string }> {
   if (typeof options === 'string') return { enabled: true, runtimeImport: options }
-  return { enabled: options?.enabled !== false, runtimeImport: options?.runtimeImport ?? 'gio-uniapp-autotracker' }
+  return { enabled: options?.enabled !== false, runtimeImport: options?.runtimeImport ?? 'gio-uniapp-autotracker/autotrack' }
 }
 
 export function gioUniappAutoTrack(options?: string | UniAppAutoTrackViteOptions): UniAppAutoTrackVitePlugin {

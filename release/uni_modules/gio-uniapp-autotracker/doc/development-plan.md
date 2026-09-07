@@ -12,9 +12,10 @@
 |---|---|---|
 | [Measurement Protocol](./measurement-protocol.md) | 字段白名单、必填性、事件含义、端间口径和请求报文 | 作为 contract fixture 的唯一字段依据；计划不得另造字段或修改含义 |
 | [SDK 架构设计](./uniapp-sdk-development.md) | 目录、依赖方向、对外 API、生命周期、存储/上传和无埋点实现边界 | 决定实现归属、运行时约束和平台验收方式 |
-| 本文 | 交付顺序、每阶段输入/输出、准入和发布门槛 | 只把前两份文档拆成可执行里程碑，不覆盖前两者 |
+| [传统 uni-app 无埋点方案](./uniapp-autotrack-design.md) | `xpath` 标识、事件名推导、插桩、隐私、去重、迁移和无埋点验收 | 决定阶段 4 的具体实现与测试向量 |
+| 本文 | 交付顺序、每阶段输入/输出、准入和发布门槛 | 只把前三份文档拆成可执行里程碑，不覆盖前三者 |
 
-若三份文档出现冲突，先停止对应实现：字段与报文以 Protocol 为准，工程边界与 API 以架构设计为准，随后修订本文的顺序和验收项。二期能力不得作为一期基础链路的前置条件。
+若这些文档出现冲突，先停止对应实现：字段与报文以 Protocol 为准，无埋点具体行为以无埋点方案为准，工程边界与公共 API 以架构设计为准，随后修订本文的顺序和验收项。二期能力不得作为一期基础链路的前置条件。
 
 当前开发节奏经用户明确授权采用“**开发先行、端侧验证后置**”：阶段 1 与后续纯 TypeScript core 可以在前序阶段的静态契约测试通过后并行推进；App 编译、真机、collector / 服务端接收证据仍必须在对应功能标记完成或进入发布阶段前补齐。任何实现提交都必须标明其仅有静态证明，不能借此跳过阶段 3 至 5 的端侧门槛。
 
@@ -70,7 +71,7 @@
 ### 验收
 
 - `VISIT`、`PAGE`、`CUSTOM`、`LOGIN_USER_ATTRIBUTES`、`APP_CLOSED`、`VIEW_CLICK`、`VIEW_CHANGE` 全部通过 protocol snapshot。
-- 配置 fixture 覆盖最小必传输入、`serverUrl` 缺省默认值、仅域名补 `https://`、尾部斜杠移除、显式非法地址、非法必填项、失败后修正重试、首次成功后的重复初始化，以及禁止热修改项；失败的 `init()` 不创建实例也不读写 SDK storage。同一 JS 运行期多次 `createGioTracker()` 必须返回同一引用，且不会重复队列或生命周期监听。`sessionExpires` 覆盖 App 默认 `0.5` 分钟、合法正小数/整数覆盖、`0`/负数/NaN/Infinity/非数字拒绝，以及 `ResolvedGioConfig` 只向 session core 暴露毫秒 `sessionPolicy` 而非原始配置值。App 传入空、正常或异常 `appId` 均不影响 `ResolvedGioConfig`、storage、日志或采集报文；`appChannel` 覆盖三端非空值均上报、空白/未传均省略、不会读取平台系统渠道且禁止运行时修改；core、adapter、plugin 读取到的均为同一份完整 App `ResolvedGioConfig`。
+- 配置 fixture 覆盖最小必传输入、`serverUrl` 缺省默认值、仅域名补 `https://`、尾部斜杠移除、显式非法地址、非法必填项、失败后修正重试、首次成功后的重复初始化，以及禁止热修改项；失败的 `init()` 不创建实例也不读写 SDK storage。同一 JS 运行期内首次 `gdp('init', ...)` 只创建一个内部 runtime，重复初始化不会重复队列或生命周期监听。`sessionExpires` 覆盖 App 默认 `0.5` 分钟、合法正小数/整数覆盖、`0`/负数/NaN/Infinity/非数字拒绝，以及 `ResolvedGioConfig` 只向 session core 暴露毫秒 `sessionPolicy` 而非原始配置值。App 传入空、正常或异常 `appId` 均不影响 `ResolvedGioConfig`、storage、日志或采集报文；`appChannel` 覆盖三端非空值均上报、空白/未传均省略、不会读取平台系统渠道且禁止运行时修改；core、adapter、plugin 读取到的均为同一份完整 App `ResolvedGioConfig`。
 - `setUserAttributes()` fixture 覆盖匿名与已登录两种状态：均立即发送，不缓冲；仅已登录快照携带 userId/userKey。
 - 未传 `dataCollect` 的初始化立即进入可采集状态；显式 `false` 时仍可初始化必要 identity/session 状态，但不产生、不持久化、不上传事件。
 - `init()` 前除 `registerPlugins()` 的插件声明外，所有业务 API 返回 `false` 且不缓存；首次成功后的重复 `init()` 返回 `false` 且不重复注册监听；一期没有 `destroy()` 或成功实例的重新初始化。未传 `sessionExpires` 时，App profile 在后台 30 秒后切换为新 session，不因 30 秒内入口变化切换；传值时按该分钟数判断。Session core 通过解析后的 `SessionPolicy` 比较时间；未来 Web / 小程序默认值分别为 30 分钟 / 5 分钟，同样允许 init 传入合法分钟数覆盖。
@@ -134,20 +135,20 @@
 ### 工作项
 
 1. 实现一方内置插件 `autotrack/plugin.ts`（名称 `gioEventAutoTracking`）：通过一期的内置插件注册表安装 tabBar / 页面 hook 和模块内 dispatcher gateway；它只把合法 `AutoTrackCall` 交给 core 内部入口，由 core 生成受协议约束 `VIEW_CLICK` / `VIEW_CHANGE`。不实现通用 `GioPlugin`、hook、capability 或 dispose 契约。
-2. 实现其 Vite 伴随插件 `vite.ts` 与 `autotrack/vue3-vite.ts`，在 uni 编译器前处理 Vue 3 `.vue` SFC 的 template AST；它只安装探针，不建事件、不写队列、不发请求。Vue 2 / Webpack 不在 1.0 无埋点范围内。
-3. 定义并固定版本化 `AutoTrackCall`；编译产物只调用 `runtime/autotrack-dispatch.ts`，由 dispatcher 路由至已 ready 的 `gioEventAutoTracking`，未注册/不匹配安全返回 false。
+2. 实现其 Vite 伴随插件 `vite.ts` 与 `autotrack/vue3-vite.ts`，在 uni 编译器前使用 `@vue/compiler-sfc` 读取完整 Vue 3 `.vue` SFC，再处理 template AST；不得用正则截取可能嵌套的 `<template>`。它只安装探针，不建事件、不写队列、不发请求。Vue 2 / Webpack 不在 1.0 无埋点范围内。
+3. 按[无埋点方案](./uniapp-autotrack-design.md)定义并固定版本化 `AutoTrackCall`；普通模板 probe 传 `eventName`，白名单 change 额外传组件类型和 picker range，runtime 从第二参数 native event 即时裁出受限 change 快照，并以 `currentTarget || target` 的 id 生成 `id#eventName`；tabBar 固定为 `#onTabItemTap`。编译产物只调用 `runtime/autotrack-dispatch.ts`，由 dispatcher 路由至已 ready 的 `gioEventAutoTracking`，未注册/不匹配安全返回 false。
 4. 覆盖 click/tap、tab、input/textarea、switch、slider、radio、checkbox、picker、picker-view 和 swiper 的受支持语义。
-5. 实现 `data-growing-ignore`、`data-growing-track`、`data-title`、`data-index`、`data-src`、敏感 input 默认拒绝和最大长度限制。
-6. 实现父子冒泡、重复 callback 和输入组件 confirm/change/blur 连发下的 pageKey + 元素稳定标识去重；不以真值判断丢弃 0、false、空字符串或空数组。
-7. 对无法安全改写的动态事件名、复杂表达式和自定义组件，保持原代码并输出 build warning。
+5. 实现 `data-growing-ignore`、`data-growing-track`、`data-title`、`data-index`、`data-src`、敏感 input 默认拒绝和最大长度限制；ignore 同时检查 currentTarget 与原始 target，敏感 probe 即使带 track 也整条拒绝，`data-index` 仅接受大于 0 且小于 2147483647 的规范十进制整数。
+6. input / textarea 同时声明 confirm/change/blur 时只选择一个完成事件插针；对重复 callback 实现同 native event 对象去重，以及按 pageKey、元素和值约束的有效时间戳窄窗去重；不以真值判断丢弃 0、false、空字符串或空数组。
+7. 对无法安全改写的动态事件名、复杂表达式、自定义组件和带事件修饰符的 listener，保持原代码、不插桩并输出 build warning。
 8. 扫描 `.nvue` 页面；一期不插桩其 click/change，仅保留生命周期页面事件和手动埋点能力，并输出 build warning。
 
 ### 验收
 
-- fixture 覆盖完整链路：“源 SFC -> 转换代码 -> dispatch -> 无埋点插件 normalizer -> core protocol/queue -> mock collector”，并验证 Vite 或运行时插件任一缺失时安全不采集。
-- 原 handler 的调用次数、参数、修饰符、返回值和抛错行为不变。
+- fixture 覆盖完整链路：“源 SFC -> 转换代码 -> dispatch -> 无埋点插件 normalizer -> core protocol/queue -> mock collector”，并验证普通模板 `xpath` 只会是 `id#eventName`、tabBar 固定为 `#onTabItemTap`，以及 Vite 或运行时插件任一缺失时安全不采集。
+- 原 handler 的调用次数、参数、返回值和抛错行为不变；带修饰符的 listener 不插桩，原代码和修饰符行为保持不变并有构建告警。
 - SDK 自身异常不影响 handler；handler 抛错不被 SDK 吞掉。
-- 无埋点 runtime gateway 在重复 init 失败、插件未注册和插件安装失败时不泄漏；冒泡重复、同一次输入的 confirm/change/blur 连发只生成一次对应 `VIEW_*`，不同父子显式节点与不同值的连续 change 不被误吞。
+- 无埋点 runtime gateway 在重复 init 失败、插件未注册和插件安装失败时不泄漏；同一对象或宿主不同包装对象造成的重复 callback 只生成一次对应 `VIEW_*`，不同父子显式节点与不同值的连续 change 不被误吞，零或非法时间戳不会导致后续事件永久丢失。
 - password / 动态 type / 证件 / 支付 / 文件等敏感值不出现在报文或日志。
 - HarmonyOS 的每个 `VIEW_CHANGE` 组件单独通过真机与服务端门槛，否则禁用。
 - `.nvue` fixture 断言页面事件与手动埋点可用，且不会被错误宣称为无埋点支持。
@@ -197,11 +198,11 @@
 | 阶段 | 当前状态 | 允许标记完成的最小证据 |
 |---|---|---|
 | 0 | 静态完成；端侧验证阻塞 | contract fixtures、package / demo / mock collector 骨架与本地启动记录；仍缺可用 HBuilderX CLI 下的 demo 编译记录 |
-| 1 | 静态完成；端侧验证阻塞 | config / protocol / identity / session / event sequence / plugin registry、page / location state、tracker init 生命周期已有 unit 与 contract 覆盖；identity / session / meta / queue 与 SystemContext 已通过统一 hydration gate 恢复，tracker gate 已完成 bootstrap 排空与 dataCollect 切换，EventComposer 已把可信系统/身份/session/location context 构成后入队，`TrackerRuntime` 已串联 hydration 后的 track、用户属性、A→B 换人 VISIT 与 dataCollect 恢复；公开 `createGioTracker` 已固定单例语义，接入文档已具备，仍缺端侧证明 |
+| 1 | 静态完成；端侧验证阻塞 | config / protocol / identity / session / event sequence / plugin registry、page / location state、tracker init 生命周期已有 unit 与 contract 覆盖；identity / session / meta / queue 与 SystemContext 已通过统一 hydration gate 恢复，tracker gate 已完成 bootstrap 排空与 dataCollect 切换，EventComposer 已把可信系统/身份/session/location context 构成后入队，`TrackerRuntime` 已串联 hydration 后的 track、用户属性、A→B 换人 VISIT 与 dataCollect 恢复；公开 `gdp` 已固定单例初始化语义，接入文档已具备，仍缺端侧证明 |
 | 2 | 静态完成；端侧验证阻塞 | ports、identity / session / queue 持久化、collector 请求、单请求 finalizer、有界并发 uploader、后台 force flush、App storage/request/SystemContext adapter 已有 fake 测试；`TrackerRuntime` 已在每次成功的事件路径触发 queue/meta 持久化与 uploader，`createAppTracker` 已把 App storage/request/SystemContext/时钟/时区/方向组合进 runtime；debug 事件数组只在 uploader 的真实派发前从协议事件生成，不含 queue 内部元数据。仍缺网络恢复、后台 deadline 的真实 App 行为与 collector 失败路径集成 |
 | 3 | 静态完成；端侧验证阻塞 | `runtime/app-lifecycle.ts` 已覆盖 launch 不重复发 VISIT、onShow session 续接/超时更新、onHide 的 APP_CLOSED→持久化→force flush 顺序及 dataCollect 恢复后的 VISIT；`runtime/page-lifecycle.ts` 已覆盖 onLoad 冻结 page snapshot、onShow 自动 PAGE、page hide 不推断 APP_CLOSED，方向 resolver 已覆盖标准值/窗口推断/最近值/PORTRAIT 兜底；App/Page bridge 已将宿主参数裁成 JSON 快照，并接入 demo（默认 `dataCollect:false` 防止误发）；tabBar bridge 生成版本化 click intent。三端 profile 仍全为 false，缺三端编译、真实请求串联与冷/热启动、导航、后台 collector 接收记录 |
-| 4 | 静态完成；端侧验证阻塞 | `AutoTrackCall` 已固定为编译器与 runtime 共用的 JSON 契约，当前 `schemaVersion: 1`，版本不匹配安全拒绝；仅已注册的 `gioEventAutoTracking` 且存在当前 shown page 时可构建 VIEW 事件，字段仍经 protocol 白名单裁剪。Vue template AST 已覆盖白名单内置组件的静态且无修饰符的 `@click/@tap/@change`，以及 input/textarea 的单一 `@blur/@confirm` 补充 probe：同一元素声明多个 completion callback 时只选择 `change`、`blur`、`confirm` 中优先的一项，原 handler 不变。直接箭头 listener 与条件选择方法引用会由专用 wrapper 保留参数、返回值与异常路径；动态事件、修饰符、空 handler、自定义组件、不支持的组件事件及其他嵌套表达式保持原样并返回 warning；`uni-link` 无 handler 时仅插入点击探针，`.nvue` 不插桩且产生 build warning。SFC/Vite transform 已在发生改写时幂等注入 `dispatchAutoTrack`，并经 Vue 编译回归；App factory 安装 dispatcher target。静态集成测试已覆盖源 SFC → 版本化 probe → dispatcher JSON 快照 → 已注册插件门控 → `VIEW_CHANGE` 入队。静态或运行时 `data-growing-ignore`、`data-growing-sensitive`、密码/文件类型输入会拒绝采集；动态元数据及允许的 change 值只在 dispatcher 边界快照为受限 JSON，文本去控制字符并限 100 字符。相同原生事件中的相同 probe 在此边界去重，事件对象不进入协议或持久化数据，父子不同 XPath 各自保留。仍缺按端组件语义与 HarmonyOS change 能力矩阵、真实请求与服务端接收证据 |
-| 5 | 静态发布物完成；端侧验证阻塞 | 已生成并检查 `release/uni_modules/gio-uniapp-autotracker`：目录白名单、public package metadata、runtime/Vite 双入口和 Vite 编译依赖均已验证；仍缺干净工程复装、三端编译与真机证据包 |
+| 4 | v1 静态实现存在；schema v2 待实施；端侧验证阻塞 | **本格仅记录当前代码快照，不是目标契约。**当前 `schemaVersion: 1` 仍由编译器生成结构 xpath，只完成同 native event 对象去重和基础隐私快照；它必须按[无埋点方案](./uniapp-autotrack-design.md)迁移到 `id#eventName`、`@vue/compiler-sfc` 完整 SFC 解析、受限 change 组件上下文、双目标 ignore、敏感 probe 整条拒绝、正整数 index 和两层去重。现有模板 AST 已覆盖部分无修饰符 handler、单一完成事件和 `uni-link` 探针，但嵌套 template、warning 透出、唯一 import 别名、schema v2 全链路测试尚未完成；Android、iOS、HarmonyOS 的组件能力矩阵、真实请求与服务端接收证据也全部待补。 |
+| 5 | 当前 v1 发布物检查通过；v2 发布物待重建；端侧验证阻塞 | 现有 release 包已验证目录白名单、public package metadata 与 runtime/Vite 双入口；schema v2 实施后必须重新生成，并补充检查 `@vue/compiler-sfc`、`@vue/compiler-dom` 与事件表达式 parser 均作为运行依赖进入发布包。之后仍需干净工程复装、三端编译与真机证据包。 |
 
 证据按“自动化测试结果、构建日志、脱敏请求摘要、collector / 服务端接收结果、真机日志与能力矩阵”归档。请求摘要和日志不得包含完整身份值、输入内容、token、cookie 或其他凭据。某项仅有静态测试、仅有构建成功、或仅有 HTTP 200 时，只能记录对应层级已通过，不能把整项能力标记为完成。
 

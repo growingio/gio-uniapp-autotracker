@@ -44,17 +44,22 @@ function normalizeEntry(entry: AppEntrySnapshot): AppEntrySnapshot {
 export class AppLifecycle {
   private launchEntry: AppEntrySnapshot | null = null
   private currentEntry: AppEntrySnapshot | null = null
+  private coldStartPending = false
 
   public constructor(private readonly dependencies: AppLifecycleDependencies) {}
 
-  /** Records launch data for diagnostics only; App.onShow is the single source for VISIT input. */
+  /** Marks a new App JS runtime; its following onShow owns the fresh-session VISIT. */
   public onLaunch(entry: AppEntrySnapshot): void {
     this.launchEntry = normalizeEntry(entry)
+    this.coldStartPending = true
   }
 
   public onShow(entry: AppEntrySnapshot): AppShowResult {
     this.currentEntry = normalizeEntry(entry)
-    const session = this.dependencies.sessions.resume(this.dependencies.clock.now())
+    const session = this.coldStartPending
+      ? this.dependencies.sessions.onProcessLaunch()
+      : this.dependencies.sessions.resume(this.dependencies.clock.now())
+    this.coldStartPending = false
     this.persistSession(session.snapshot)
     const visitQueued = session.startedNew && this.dependencies.canCollect()
       ? this.dependencies.composer.compose({ eventType: 'VISIT', fields: this.currentEntry }).ok

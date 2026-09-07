@@ -20,6 +20,26 @@ export function normalizeAppNetworkState(value: unknown, isConnected: unknown = 
   return 'UNKNOWN'
 }
 
+function plusNetworkState(): NetworkState {
+  const plus = (globalThis as Readonly<Record<string, unknown>>).plus
+  if (typeof plus !== 'object' || plus === null || Array.isArray(plus)) return 'UNKNOWN'
+  const networkInfo = (plus as Readonly<Record<string, unknown>>).networkinfo
+  if (typeof networkInfo !== 'object' || networkInfo === null || Array.isArray(networkInfo)) return 'UNKNOWN'
+  const source = networkInfo as Readonly<Record<string, unknown>>
+  if (typeof source.getCurrentType !== 'function') return 'UNKNOWN'
+  try {
+    const current = (source.getCurrentType as () => unknown)()
+    if (current === source.CONNECTION_WIFI) return 'WIFI'
+    if (current === source.CONNECTION_2G) return '2G'
+    if (current === source.CONNECTION_3G) return '3G'
+    if (current === source.CONNECTION_4G) return '4G'
+    if (current === source.CONNECTION_5G) return '5G'
+    return normalizeAppNetworkState(current)
+  } catch {
+    return 'UNKNOWN'
+  }
+}
+
 /** App-only bridge for uni.getNetworkType/onNetworkStatusChange with safe UNKNOWN fallback. */
 export class AppNetworkPort implements NetworkPort {
   public constructor(private readonly api: AppNetworkApi) {}
@@ -27,15 +47,18 @@ export class AppNetworkPort implements NetworkPort {
   public current(): Promise<NetworkState> {
     return new Promise((resolve) => {
       let settled = false
+      let timeout: ReturnType<typeof globalThis.setTimeout> | null = null
       const finish = (state: NetworkState): void => {
         if (settled) return
         settled = true
+        if (timeout !== null) globalThis.clearTimeout(timeout)
         resolve(state)
       }
+      timeout = globalThis.setTimeout(() => finish(plusNetworkState()), 1000)
       try {
-        this.api.getNetworkType({ success: (result) => finish(normalizeAppNetworkState(result.networkType)), fail: () => finish('UNKNOWN') })
+        this.api.getNetworkType({ success: (result) => finish(normalizeAppNetworkState(result.networkType)), fail: () => finish(plusNetworkState()) })
       } catch {
-        finish('UNKNOWN')
+        finish(plusNetworkState())
       }
     })
   }

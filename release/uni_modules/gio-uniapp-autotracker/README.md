@@ -6,53 +6,73 @@
 
 - [全端 Measurement Protocol](./doc/measurement-protocol.md)：唯一的事件字段与端间口径来源。
 - [SDK 架构设计](./doc/uniapp-sdk-development.md)：目录、模块边界、依赖方向和运行时数据链。
+- [传统 uni-app 无埋点方案](./doc/uniapp-autotrack-design.md)：模板事件标识、插桩、隐私、去重和验收口径。
 - [开发计划](./doc/development-plan.md)：按依赖顺序拆分的实施、验证与发布门槛。
 
 仓库根目录就是 SDK 包根目录。`uni_modules/gio-uniapp-autotracker` 仅是使用方工程或发布压缩包中的安装位置，不在本仓库内再嵌套一层。
 
 ## Vue 3 / App 接入
 
-在应用入口创建单个 tracker，先注册内置无埋点插件，再初始化。App 生命周期和页面生命周期只传递已裁剪的数据快照，不传递 Vue 或 `uni` 宿主对象到 core。
+在应用入口创建 App 后，按小程序 SDK 一样调用 `gdp('registerPlugins')` 和 `gdp('init')`。`init` 传入 `uniVue: app` 后，SDK 自己读取 `uni` 宿主，并以全局 Vue mixin 自动接管 App / Page 生命周期；业务的 `App.vue` 和页面不需要引入 lifecycle bridge。
 
 ```ts
-import { createGioTracker, createAppLifecycleBridge, createPageLifecycleBridge } from 'gio-uniapp-autotracker'
+import gdp from 'gio-uniapp-autotracker'
 
-const gio = createGioTracker(uni, {
-  sdkVersion: '0.1.0',
-  deviceIdFactory: () => 'your-stable-device-id',
-  sessionIdFactory: () => 'your-session-id',
-})
-
-gio.registerPlugins({ name: 'gioEventAutoTracking' })
-gio.init({
-  accountId: 'account-id',
-  dataSourceId: 'data-source-id',
-  serverUrl: 'https://collector.example.com',
-  dataCollect: true,
-})
-
-export const appLifecycle = createAppLifecycleBridge(gio)
-// 每个页面实例创建一次 bridge，并在 onLoad/onShow/onHide/onUnload 中分别转发。
-export const createPageBridge = (instanceId: string) => createPageLifecycleBridge(gio, instanceId)
+export function createApp() {
+  const app = createSSRApp(App)
+  gdp('registerPlugins', [{ name: 'gioEventAutoTracking' }])
+  gdp('init', 'account-id', 'data-source-id', {
+    uniVue: app,
+    serverUrl: 'https://collector.example.com',
+    dataCollect: true,
+  })
+  return { app }
+}
 ```
 
-在 Vite 配置中，构建侧插件必须置于 uni 插件之前：
+业务侧只通过 `gdp()` 调用 SDK，例如 `gdp('track', 'purchase', { sku: 'sku-1' })`。SDK 不向页面暴露 tracker 或 `$gio`；只有显式通过 `gdp('registerPlugins', [...])` 注册的客户插件会在 `install(growingio)` 中收到内部实例。自动页面/App 生命周期不再要求页面代码配合。
+
+## TypeScript 类型
+
+根入口会在客户项目中自动声明全局 `gdp`，无需额外的 `.d.ts` 文件；默认导入和全局调用具有同一组严格的命令重载。可从根入口按需导入 `GdpCommand`、`GioGdpInitOptions`、`GioUniVueApp`、`GioAttributes`、`GioPlugin` 和 `GioPluginRuntime` 等类型：
+
+```ts
+import gdp, { type GioAttributes, type GioGdpInitOptions } from 'gio-uniapp-autotracker'
+
+const options = {
+  uniVue: app,
+  dataCollect: false,
+  idMapping: true,
+} satisfies GioGdpInitOptions
+
+const attributes = { sku: 'sku-1', price: 99, tags: ['new', 'sale'] } satisfies GioAttributes
+gdp('init', 'account-id', 'data-source-id', options)
+gdp('track', 'purchase_completed', attributes)
+```
+
+支持的业务命令为 `track`、`setUserId`、`clearUserId`、`setUserAttributes`、`setOptions({ dataCollect })`、`setLocation` 和 `clearLocation`；`registerPlugins` 与 `init` 是入口命令。未知命令、错误参数个数、嵌套属性或非布尔 `dataCollect` 均会在 TypeScript 编译期报错。`GioPluginRuntime` 只会作为显式注册插件的 `install(growingio)` 参数出现，页面代码仍只能调用 `gdp()`。
+
+无埋点的模板插桩是一个构建期能力，因此 Vue 3/Vite 项目仍需在 `vite.config.ts` 增加一次插件（且必须排在 `uni()` 前）。这项配置不能放在运行时 `main.ts`，因为模板在应用代码执行前就已编译：
 
 ```ts
 import { gioUniappAutoTrack } from 'gio-uniapp-autotracker/vite'
 
 export default {
-  plugins: [gioUniappAutoTrack({ enabled: true }), uni()],
+  plugins: [gioUniappAutoTrack(), uni()],
 }
 ```
 
-无埋点仅处理当前白名单内的内置组件静态 `@click`、`@tap` 与 `@change`；input/textarea 也可采集单独声明的 `@blur` 或 `@confirm`。同一元素同时声明 `change`、`blur`、`confirm` 时只选择一个完成事件插针，原业务 handler 全部保留。`data-growing-ignore` 和敏感输入会拒绝采集；`change` 值只有在非敏感元素显式使用 `data-growing-track` 时才会被传递。动态事件、自定义组件、修饰符及歧义 listener 表达式保持业务代码不变并产生构建告警。`.nvue` 不在一期模板插桩范围内，也会产生构建告警。
+无埋点仅处理当前白名单内的内置组件静态 `@click`、`@tap` 与 `@change`；input/textarea 也可采集单独声明的 `@blur` 或 `@confirm`。待实施的普通模板 `xpath` 口径不是结构路径，而是在 runtime 按小程序口径生成 `id#eventName`；`uni-link` 使用 `#openURL`，tabBar 使用 `#onTabItemTap`。同一元素同时声明 `change`、`blur`、`confirm` 时只选择一个完成事件插针，原业务 handler 全部保留。`data-growing-ignore` 和敏感输入会拒绝整条采集，`data-growing-track` 不能覆盖敏感规则；非敏感 `change` 值仅在显式标记 track 时传递。`data-index` 仅接受大于 0 且小于 2147483647 的整数。动态事件、自定义组件、修饰符及歧义 listener 表达式保持业务代码不变、不插桩并产生构建告警。`.nvue` 不在一期模板插桩范围内，也会产生构建告警。完整规则见[无埋点方案](./doc/uniapp-autotrack-design.md)。
 
 当前实现已完成 TypeScript、Vue 编译与 mock collector 静态覆盖；Android、iOS、HarmonyOS 的真实编译、设备请求和服务端接收仍是发布前必需证据，尚不能据此宣称已完成三端验收。
 
 `appCapabilityProfile(platform)` 可读取发布门禁使用的能力表。当前三端全部为 `false`，直到各端的编译版本、真机请求和 collector 接收记录归档后才可逐项开放。
 
 `debug: true` 只在本地输出 `[GrowingIO Debug]:` 的操作标签与即将派发的协议事件数组；不会输出队列内部元数据，也不会改变隐私、重试或采集行为。
+
+## Showcase demo
+
+先运行 `pnpm build:sdk`，它将编译产物写入 `demo/uni_modules/gio-uniapp-autotracker`。然后可用 HBuilderX 打开 [demo](./demo) 目录；demo 只引用这份编译产物，不跨目录引用 SDK 源码。它默认采集，以便启动后验证 `VISIT`、生命周期、`track`、身份和用户属性、路由上下文、Vue 3 无埋点及 `dataCollect` 动态开关；如需隐私同意流程，可在 `main.ts` 显式关闭后通过示例页恢复采集。ABTest 和微信分享会明确显示为当前未实现，而非模拟接口结果。详见 [demo/README.md](./demo/README.md)。
 
 ## 发布目录
 
