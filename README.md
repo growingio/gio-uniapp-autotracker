@@ -6,6 +6,7 @@
 
 - [全端 Measurement Protocol](./doc/measurement-protocol.md)：唯一的事件字段与端间口径来源。
 - [SDK 架构设计](./doc/uniapp-sdk-development.md)：目录、模块边界、依赖方向和运行时数据链。
+- [传统 uni-app 无埋点方案](./doc/uniapp-autotrack-design.md)：模板事件标识、插桩、隐私、去重和验收口径。
 - [开发计划](./doc/development-plan.md)：按依赖顺序拆分的实施、验证与发布门槛。
 
 仓库根目录就是 SDK 包根目录。`uni_modules/gio-uniapp-autotracker` 仅是使用方工程或发布压缩包中的安装位置，不在本仓库内再嵌套一层。
@@ -61,7 +62,7 @@ export default {
 }
 ```
 
-无埋点仅处理当前白名单内的内置组件静态 `@click`、`@tap` 与 `@change`；input/textarea 也可采集单独声明的 `@blur` 或 `@confirm`。同一元素同时声明 `change`、`blur`、`confirm` 时只选择一个完成事件插针，原业务 handler 全部保留。`data-growing-ignore` 和敏感输入会拒绝采集；`change` 值只有在非敏感元素显式使用 `data-growing-track` 时才会被传递。动态事件、自定义组件、修饰符及歧义 listener 表达式保持业务代码不变并产生构建告警。`.nvue` 不在一期模板插桩范围内，也会产生构建告警。
+无埋点仅处理当前白名单内的内置组件静态 `@click`、`@tap` 与 `@change`；input/textarea 也可采集单独声明的 `@blur` 或 `@confirm`。待实施的普通模板 `xpath` 口径不是结构路径，而是在 runtime 按小程序口径生成 `id#eventName`；`uni-link` 使用 `#openURL`，tabBar 使用 `#onTabItemTap`。同一元素同时声明 `change`、`blur`、`confirm` 时只选择一个完成事件插针，原业务 handler 全部保留。`data-growing-ignore` 和敏感输入会拒绝整条采集，`data-growing-track` 不能覆盖敏感规则；非敏感 `change` 值仅在显式标记 track 时传递。`data-index` 仅接受大于 0 且小于 2147483647 的整数。动态事件、自定义组件、修饰符及歧义 listener 表达式保持业务代码不变、不插桩并产生构建告警。`.nvue` 不在一期模板插桩范围内，也会产生构建告警。完整规则见[无埋点方案](./doc/uniapp-autotrack-design.md)。
 
 当前实现已完成 TypeScript、Vue 编译与 mock collector 静态覆盖；Android、iOS、HarmonyOS 的真实编译、设备请求和服务端接收仍是发布前必需证据，尚不能据此宣称已完成三端验收。
 

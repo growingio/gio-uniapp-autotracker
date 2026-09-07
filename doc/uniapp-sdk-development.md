@@ -518,6 +518,8 @@ type PageSnapshot = {
 
 ## 7. 无埋点设计
 
+> **实施口径：**本节保留无埋点的架构边界。普通模板 `xpath`、事件名推导、schema v2、tabBar、`uni-link`、隐私、去重、迁移和验收细节以[传统 uni-app 无埋点方案](./uniapp-autotrack-design.md)为准；该方案优先于本节中任何较早的结构路径或旧 `AutoTrackCall` 示例。
+
 ### 7.1 为什么必须编译期插桩
 
 传统 uni-app App 的 `.vue` 页面在 App 端使用 webview，`.nvue` 使用原生渲染；同一路由若两种文件并存，App 优先使用 `.nvue`，非 App 使用 `.vue`。[页面渲染规则](https://uniapp.dcloud.net.cn/tutorial/page.html)
@@ -555,31 +557,14 @@ gdp('registerPlugins', [{ name: 'gioEventAutoTracking' }])
 gdp('init', 'account-id', 'data-source-id', { ...options, uniVue: app })
 ```
 
-Vite 插件不得直接构建网络事件，它只调用 runtime 的稳定协议：
+Vite 插件不得直接构建网络事件，它只调用 runtime 的稳定 schema v2 协议。内部类型不在本架构文档复制第二份，以[无埋点方案的版本化 call 合约](./uniapp-autotrack-design.md#32-版本化-call-合约)为唯一来源。其边界固定为：
 
-```ts
-type AutoTrackAction = 'click' | 'change'
+- template probe 传 `eventName`、白名单 change 的 `elementType`/picker range，以及允许的模板 metadata；不传结构 xpath；change 的受限值由 dispatcher 从第二参数 native event 即时裁出；
+- tabBar probe 传固定 `#onTabItemTap`、一基 index、text 和 pagePath；
+- 原始 native event 仅作为 `dispatchAutoTrack(probe, nativeEvent)` 的瞬时参数，不写入 probe、日志、队列或协议；
+- normalizer 完成隐私判断、`id#eventName`、组件值归一和去重后，才把纯 JSON 的 `NormalizedAutoTrackCall` 交给 `EventDispatcher`。
 
-type AutoTrackCall = {
-  schemaVersion: 1
-  action: AutoTrackAction
-  nativeEvent: unknown
-  source: 'template' | 'tabbar'
-  component: string | null
-  element: {
-    id: string | number | null
-    index: string | number | null
-    title: string | number | boolean | null
-    src: string | number | boolean | null
-    growingTrack: boolean | null
-    growingIgnore: boolean | null
-  }
-}
-
-dispatchAutoTrack(call: AutoTrackCall): boolean
-```
-
-`dispatchAutoTrack()` 是 dispatcher 对 `gioEventAutoTracking` 的唯一入口：插件未注册、尚未 ready、`dataCollect=false`、页面快照不存在、call 不合法、元素被忽略/敏感或被去重时都返回 `false`，不抛异常、不影响业务 handler。只有插件 normalizer 确认得到可上报动作后，才调用 core 的受限内部入口；core 仍是唯一能把它变成协议 `VIEW_*` 事件的一层。
+`dispatchAutoTrack()` 是 dispatcher 对 `gioEventAutoTracking` 的唯一入口：插件未注册、尚未 ready、`dataCollect=false`、页面快照不存在、schema 不匹配、元素被忽略/敏感或被去重时都返回 `false`，不抛异常、不影响业务 handler。只有插件 normalizer 确认得到可上报动作后，才调用 core 的受限内部入口；core 仍是唯一能把它变成协议 `VIEW_*` 事件的一层。
 
 `runtime/autotrack-dispatch.ts` 只保存当前 tracker 的模块内 gateway，不挂到 `globalThis`、Vue app 或 `uni` 对象。`gioEventAutoTracking` 成功安装后以实例 token attach gateway；一期没有 destroy/re-init，重复 init 直接失败。未来若支持多实例或完整销毁，必须在 `AutoTrackCall` 中新增显式 tracker key，不能按全局“最后初始化者”猜测。
 
@@ -587,29 +572,15 @@ dispatchAutoTrack(call: AutoTrackCall): boolean
 
 ### 7.3 click 支持规则
 
-一期支持的可采集行为：
+一期支持白名单内置组件上没有修饰符的静态 `@click`、`@tap`，以及 `uni-link` 和 TabBar。普通元素没有业务 handler 时不凭空添加 listener；只有 `uni-link` 可以按明确宿主语义补充 `openURL` 采集 handler。动态事件名、自定义组件、计算成员/复杂表达式和带 `.stop`、`.prevent`、`.once`、`.capture`、`.self` 等修饰符的 listener 均保持原代码、不插桩并输出构建告警。
 
-- 内置组件上的 `@click`、`@tap`，以及经能力表确认的别名；
-- `uni-link` / 明确可导航组件的点击；
-- TabBar 的 `onTabItemTap`；
-- 未写业务 handler 的可点击元素，插入只采集的 handler；
-- 已写 handler 的元素，在不改变原语义的前提下**先同步采集快照、后执行业务 handler**。
+对可安全插桩的 handler，必须按纯方法引用、内联调用、箭头/函数表达式和顶层条件表达式分别生成代码，保证原 handler 只执行一次，`$event`、参数、返回值、抛错与求值次数不变。Options API、普通 `setup()` 与 `<script setup>` 的事件名口径相同，但 import 注入、模板绑定和 Ref 自动解包必须分别验证；完整改写矩阵以[无埋点方案](./uniapp-autotrack-design.md#41-推导规则)为准。
 
-插桩器必须保持以下业务语义：
-
-1. 原 handler 只执行一次；
-2. 纯方法引用原本是否接收 `$event`，保持不变；
-3. 内联表达式、箭头函数、三元表达式均不改变求值次数；
-4. `.stop`、`.prevent`、`.once`、`.capture`、`.self` 等修饰符保留；
-5. `v-for` 内的动态 `id`、`data-index`、`data-title`、`data-src` 在运行时求值；
-6. handler 抛错时不被 SDK 吞掉；SDK 自身异常也不影响业务 handler；
-7. 事件冒泡可能导致父子都插桩时，元素信息优先取当前插桩节点的 `currentTarget`；以 `pageKey + action + 该节点稳定标识 + 同一次 native event` 去重。不同父子节点是两个显式交互目标时可各上报一次；同一节点被重复 dispatch 时只能上报一次。
-
-编译器注入的调用必须在原 handler 之前执行且永不 await：这样业务 handler 即使立即跳转/销毁页面，自动采集仍使用触发瞬间的 pageKey 和元素元数据。采集侧异常由 dispatcher 吞掉并记诊断；业务 handler 的返回值、抛错、参数个数、修饰符以及调用次数不受影响。
+编译器注入的调用必须在原 handler 之前执行且永不 await：这样业务 handler 即使立即跳转/销毁页面，自动采集仍使用触发瞬间的 pageKey 和元素元数据。采集侧异常由 dispatcher 吞掉并记诊断；业务 handler 的返回值、抛错、参数个数以及调用次数不受影响。带修饰符的 listener 根本不进入这条改写链。
 
 ### 7.4 change 支持规则
 
-`change` 不是单一事件。以下组件及值形态必须独立归一：
+`change` 不是单一事件。Vite 必须把白名单组件类型和 picker range 显式传给 runtime；dispatcher 再从 native event 即时裁出受限快照，不能假设每个 App 端都能从同一条 `event.detail.value` 读取。以下组件及值形态必须独立归一：
 
 | 组件 | 候选事件 | 归一化值 | 默认是否上传值 |
 |---|---|---|---|
@@ -622,9 +593,9 @@ dispatchAutoTrack(call: AutoTrackCall): boolean
 | `picker-view` | `change` | 每列下标或显示值 | 否 |
 | `swiper` | `change` | `current` / `source` | 否；可仅报 `data-title` |
 
-默认值策略是“只记录组件发生变化”，即 `VIEW_CHANGE` 可带 xpath 和组件类型，但 `textValue` 为 `null`。仅当业务显式标记 `data-growing-track` 且组件不属于敏感类别时，才允许采集规范化后的值。
+默认值策略是“只记录组件发生变化”，即 `VIEW_CHANGE` 可带 xpath，但 `elementType` 仅参与内部归一化、不进入协议，`textValue` 默认为 `null`。仅当业务显式标记 `data-growing-track` 且组件不属于敏感类别时，才允许采集规范化后的值。
 
-同一组件的一次输入动作可能依次触发 `confirm`、`change`、`blur`。normalizer 必须基于 `pageKey + 元素稳定标识 + 规范化值 + 原生事件关联信息` 做组件级去重，保证同一变化只进入一次 `VIEW_CHANGE`；不同值的连续修改不能被合并。`0`、`false`、空字符串和空数组是合法变化值，不能因真值判断被丢弃。
+同一 input / textarea 同时声明 `change`、`blur`、`confirm` 时，Vite 按 `change → blur → confirm` 只选择一个完成事件插针，其他业务 handler 保持原样。宿主重复包装同一事件时，再由 runtime 使用“同对象 + 每页元素窄时间窗”两层去重；不同值的连续修改不能被合并。`0`、`false`、空字符串和空数组不能因真值判断导致整条变化事件丢失。
 
 官方 `input` 的 `input`、`blur`、`confirm` 事件和平台支持面不同，不能把一个事件字段读取公式复制到所有组件或端上。[input 组件](https://uniapp.dcloud.net.cn/component/input.html)
 
@@ -637,10 +608,10 @@ dispatchAutoTrack(call: AutoTrackCall): boolean
 | `data-growing-ignore` | 当前元素及其事件绝不采集；优先级最高 |
 | `data-growing-track` | 允许该元素按配置采集可采集值；不覆盖敏感禁止规则 |
 | `data-title` | 点击/允许的变更事件的展示文本 |
-| `data-index` | 列表序号，仅 `VIEW_CLICK` |
+| `data-index` | 列表序号，仅 `VIEW_CLICK`；只接受大于 0 且小于 2147483647 的规范十进制整数 |
 | `data-src` | 链接地址，仅 `VIEW_CLICK` |
 
-强制忽略：静态或可识别为动态的 password / safe-password 输入、验证码、身份证、银行卡、支付、文件内容、富文本 HTML。动态 `:type` 无法在编译期安全确认时，默认当作敏感，不上传值。值还应执行 trim、最大长度（建议 100）、控制字符处理和日志脱敏。
+强制忽略：`data-growing-sensitive`，静态 password / safe-password / file input，以及一期无法可靠确认安全类型的动态 `:type`。这些情况拒绝整个 probe，不产生 `VIEW_CHANGE`；即使存在 `data-growing-track` 也不能覆盖。验证码、身份证、银行卡、支付等业务敏感字段应由业务显式添加 `data-growing-sensitive`。敏感值必须在读取、字符串化和记录去重键之前短路；其他允许采集的值仍执行 trim、最大长度（建议 100）、控制字符处理和日志脱敏。
 
 ### 7.6 HarmonyOS 特殊门槛
 
@@ -680,26 +651,27 @@ dispatchAutoTrack(call: AutoTrackCall): boolean
 
 ### 8.1 xpath / 元素标识
 
-一期不追求浏览器 DOM XPath。采用稳定、跨端、可圈选的逻辑标识：
+一期不追求浏览器 DOM XPath。传统 uni-app Vue 3 模板采用与小程序一致的逻辑标识：
 
 ```text
-{page.route}#{handlerName-or-eventName}#{element.id-or-component}
+{currentTarget || target 的 id}#{实际 handlerName-or-eventName}
 ```
 
-当元素有 `id` 时优先用 id；无 id 时使用插桩器生成的稳定模板位置标识；`v-for` 内使用 `data-index` 作为附加维度，不能把数组下标当成永久节点 ID。标识规则必须版本化，避免发布后圈选配置整体失效。
+主目标存在但没有 id 时 id 为空，结果为 `#eventName`；不得回退为模板位置或子节点 target 的 id。`v-for` 内的 `data-index` 仅是 `VIEW_CLICK.index` 附加维度，不能充当节点 ID，且只接受大于 0 且小于 2147483647 的规范十进制整数。无业务 handler 的 `uni-link` 固定为 `#openURL`，tabBar 固定为 `#onTabItemTap`。完整的版本化契约、推导与迁移规则见[传统 uni-app 无埋点方案](./uniapp-autotrack-design.md)。
 
 ### 8.2 去重
 
-去重键建议为：
+运行时先用 native event 对象身份抑制同一对象上的重复 probe，再用以下键覆盖宿主产生不同 JS 包装对象的情况：
 
 ```text
-pageKey + action + xpath + normalizedValueHash + eventTimestampBucket
+pageKey + nativeEvent.type + action + xpath + textValue + index + hyperlink
 ```
 
-- 只去重同一物理交互的重复回调；
-- 不得用单一全局时间窗去重所有页面；
-- 允许 value 为 `0`、`false`、空字符串，不可当成缺失；
-- 探针提供的交互时刻为零、缺失或不可信时，使用递增调用序列辅助，不能把所有事件合并；这只影响本地去重，不能改写协议 `timestamp`。
+- 只有键完全相同、两个时间戳均为有限正数且绝对差小于 10ms 时才判重；
+- 时间戳为 0、缺失或不可信时跳过时间窗层，不得把后续事件永久合并；
+- 页面切换清空最近事件，不得用单一全局时间窗跨页面去重；
+- 不同父子 currentTarget、不同值或不同事件类型不合并；`0`、`false`、空字符串不能因真值判断导致整条事件丢失；
+- 去重只影响本地判定，不能改写协议 `timestamp`。
 
 ---
 
@@ -970,12 +942,12 @@ export default defineConfig({
 - 静态事件名，以及已验证不会改变原语义的动态 handler 参数；
 - `@click` / `v-on:click` / `@tap`；
 - `@change`、`@blur`、`@confirm`；
-- 原 handler 缺失、纯方法引用、带参数调用、内联表达式，以及经独立业务语义回归的直接箭头 listener、条件选择方法引用；其他复杂嵌套表达式保持原样并输出 build warning；
+- 纯方法引用、带参数调用、内联表达式，以及经独立业务语义回归的直接箭头 listener、条件选择方法引用；其他复杂嵌套表达式保持原样并输出 build warning；
 - `v-for`、`v-if`、slot、动态 attribute；
 - `data-*` 元数据与静态 input type；
 - 对 `uni-link` 等无业务 handler 的组件添加只采集调用。
 
-一期不支持时必须报清晰的 build warning，并保留原业务代码。例如：动态事件名、复杂嵌套表达式、无法静态确认的自定义组件事件。绝不能生成会改变业务 handler 参数/返回值的“半正确”代码。
+SFC block 必须由 `@vue/compiler-sfc` 提取，template 内容再交给 `@vue/compiler-dom`；禁止用正则截取 SFC。普通元素缺失 handler、动态事件名、计算成员、复杂嵌套表达式、自定义组件事件和任何事件修饰符都不在一期范围内，必须报清晰的 build warning 并保留原业务代码。绝不能生成会改变业务 handler 参数/返回值的“半正确”代码。
 
 ### 12.3 改写时序
 
@@ -989,7 +961,7 @@ export default defineConfig({
 }
 ```
 
-对于原始纯方法引用，必须通过 script AST / 签名分析判断是否原本接收 event；无法判断时要选择保守写法或放弃改写并给 warning，不能擅自改变实参个数。
+原始纯方法引用必须显式补回 Vue 原本透传的 `$event` 调用；直接箭头、函数表达式和顶层条件表达式使用各自 wrapper，保证 listener 和条件只求值一次。Options API、普通 `setup()` 与 `<script setup>` 分别验证模板上下文和 Ref 自动解包，不能只验证生成文本看起来相似。
 
 ### 12.4 二期 Vue2 预留
 
@@ -1087,12 +1059,12 @@ type Capability = {
 
 每个 fixture 都做“源码 → 生成代码 → 执行语义”三段断言：
 
-- 无 handler 的 click；
+- 普通元素无 handler 时不插桩并告警；`uni-link` 无 handler 时只补 `openURL` 探针；
 - 普通方法 / 带 event 的方法 / 带业务参数的方法；
 - 内联表达式、箭头函数、三元表达式；
-- 修饰符；
+- 修饰符保持源码、不插桩并产生可定位 warning；
 - `v-for` 动态 dataset；
-- input password 与动态 type；
+- input password、safe-password、file 与动态 type 即使带 `data-growing-track` 也不生成事件；
 - input / textarea / switch / slider / radio / checkbox / picker / picker-view / swiper；
 - 父子嵌套点击、业务 handler throw、异步导航。
 
