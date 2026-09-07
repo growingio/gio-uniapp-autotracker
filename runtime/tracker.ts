@@ -351,6 +351,7 @@ export class TrackerRuntime {
       case 'page-show': this.log('debug', `Page: ${typeof payload.instanceId === 'string' ? payload.instanceId : ''} # onShow ${timestamp}`); return
       case 'page-hide': this.log('debug', `Page: ${typeof payload.instanceId === 'string' ? payload.instanceId : ''} # onHide ${timestamp}`); return
       case 'page-unload': this.log('debug', `Page: ${typeof payload.instanceId === 'string' ? payload.instanceId : ''} # onUnload ${timestamp}`); return
+      case 'autotrack': this.log('debug', `[GrowingIO Debug]: action=${payload.kind === 'change' ? 'change' : 'click'}`); return
       default: this.log('debug', `[GrowingIO Debug]: action=${kind}`)
     }
   }

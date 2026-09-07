@@ -100,6 +100,27 @@ describe('TrackerRuntime', () => {
     ]))
   })
 
+  it('identifies click and change actions in autotrack diagnostics', async () => {
+    const logs: string[] = []
+    const logger: LoggerPort = {
+      info: (message) => logs.push(`info:${message}`), success: (message) => logs.push(`success:${message}`),
+      warn: (message) => logs.push(`warn:${message}`), error: (message) => logs.push(`error:${message}`),
+      debug: (message) => logs.push(`debug:${message}`),
+    }
+    const { tracker } = createTracker(true, true, true, logger)
+    tracker.onAppShow({ path: '/home', query: '' })
+    tracker.onPageLoad({ instanceId: 'home#1', route: 'pages/home/index', query: '', referralPage: null })
+    tracker.onPageShow('home#1', null)
+    await tracker.whenReady()
+
+    expect(tracker.autoTrack({ schemaVersion: 1, kind: 'click', xpath: '/button[1]' })).toBe(true)
+    expect(tracker.autoTrack({ schemaVersion: 1, kind: 'change', xpath: '/input[1]' })).toBe(true)
+    expect(logs).toEqual(expect.arrayContaining([
+      'debug:[GrowingIO Debug]: action=click',
+      'debug:[GrowingIO Debug]: action=change',
+    ]))
+  })
+
   it('buffers App onShow then business track through hydration and replays them in that lifecycle order', async () => {
     const { tracker } = createTracker()
     expect(tracker.onAppLaunch({ path: '/launch', query: '' })).toBe(true)
