@@ -12,6 +12,9 @@ importers:
         specifier: ^3.5.13
         version: 3.5.42
     devDependencies:
+      '@dcloudio/types':
+        specifier: 3.4.32
+        version: 3.4.32
       '@dcloudio/vite-plugin-uni':
         specifier: 3.0.0-5020420260812001
         version: 3.0.0-5020420260812001(postcss@8.5.26)(rollup@4.63.1)(vite@5.2.8(@types/node@22.20.1)(terser@5.51.2))(vue@3.4.21(typescript@5.9.3))
@@ -30,6 +33,9 @@ importers:
       vitest:
         specifier: ^3.1.4
         version: 3.2.7(@types/node@22.20.1)(terser@5.51.2)
+      vue:
+        specifier: 3.4.21
+        version: 3.4.21(typescript@5.9.3)
 
 packages:
 
@@ -577,6 +583,9 @@ packages:
   '@babel/types@7.29.8':
     resolution: {integrity: sha512-Vj1jF3cPfxg7OAfoI7QnVKLoILlm2JF9pnVHrX8qx7AHMiYWT+NDAA7jChlNgRS4WTLc/fD1lXLmPixluj+3Gg==}
     engines: {node: '>=6.9.0'}
+
+  '@dcloudio/types@3.4.32':
+    resolution: {integrity: sha512-sjhbkjUKxoym8KLEnyeXxCsxvRlBc7Bd/kNSZZRLj+lewS384bDPtq/x5FZ4iG+NrnzDmg3+HyiwV5u5vu2reQ==}
 
   '@dcloudio/uni-cli-shared@3.0.0-5020420260812001':
     resolution: {integrity: sha512-zIkoC92g6gjO413eNazc51J+pSTma0g6yv+qB4MUuNbnHkizVVQ8qRVjis6HyIw5F+WKxlKHwKDB95tA6en6XQ==}
@@ -3059,6 +3068,8 @@ snapshots:
     dependencies:
       '@babel/helper-string-parser': 7.29.7
       '@babel/helper-validator-identifier': 7.29.7
+
+  '@dcloudio/types@3.4.32': {}
 
   '@dcloudio/uni-cli-shared@3.0.0-5020420260812001(postcss@8.5.26)(rollup@4.63.1)(vue@3.4.21(typescript@5.9.3))':
     dependencies:
