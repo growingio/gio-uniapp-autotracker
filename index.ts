@@ -4,6 +4,7 @@ import type { GioBuiltinPlugin } from './core/plugin-registry.js'
 import { TrackerRuntime } from './runtime/tracker.js'
 import { installUniAppLifecycle, type UniAppVueApp } from './runtime/uniapp-installer.js'
 import { guid } from './core/guid.js'
+import { SDK_VERSION } from './core/sdk-version.js'
 
 let singleton: TrackerRuntime | null = null
 let gdpTracker: TrackerRuntime | null = null
@@ -26,7 +27,6 @@ export type GioUniVueApp = UniAppVueApp
 export type GioGdpInitOptions = Omit<GioInitOptions, 'accountId' | 'dataSourceId'> & Readonly<{
   /** The Vue app returned by createSSRApp(App); it enables SDK-owned App/Page lifecycle hooks. */
   uniVue: GioUniVueApp
-  sdkVersion?: string
 }>
 
 /** Values that are normalized into a GrowingIO event or user-attribute string. */
@@ -126,9 +126,9 @@ export const gdp: GdpCommand = (command: unknown, ...args: readonly unknown[]): 
     const input = record(args[2])
     const host = appHost()
     if (input === null || host === null || !isUniVueApp(input.uniVue)) return false
-    const { uniVue, sdkVersion, ...init } = input
+    const { uniVue, sdkVersion: _ignoredVersion, ...init } = input
     const tracker = createGioTracker(host, {
-      sdkVersion: typeof sdkVersion === 'string' && sdkVersion.trim() !== '' ? sdkVersion : '0.1.0',
+      sdkVersion: SDK_VERSION,
       deviceIdFactory: guid,
       sessionIdFactory: guid,
     })

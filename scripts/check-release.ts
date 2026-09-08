@@ -1,45 +1,35 @@
-import { access, readdir, readFile } from 'node:fs/promises'
-import { dirname, relative, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { build } from 'esbuild'
+import { dist, files, hashes, metadata, modulesDir, npmDir, sdkName, sourceHash } from './release-layout.js'
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const output = resolve(root, process.argv[2] ?? 'release/uni_modules/gio-uniapp-autotracker')
-const expected = new Set(['README.md', 'autotrack', 'autotrack.ts', 'core', 'doc', 'index.ts', 'package.json', 'platform', 'runtime', 'tsconfig.json', 'vite.ts'])
-
-async function main(): Promise<void> {
-  const outputRelative = relative(root, output)
-  if (outputRelative === '' || outputRelative.startsWith('..')) throw new Error('release_output_must_be_inside_workspace')
-  await access(output)
-  if (process.argv[2] === undefined) {
-    const releaseRoot = resolve(root, 'release')
-    const releaseEntries = await readdir(releaseRoot)
-    if (releaseEntries.length !== 1 || releaseEntries[0] !== 'uni_modules') throw new Error('release_root_content_mismatch')
-    const moduleEntries = await readdir(resolve(releaseRoot, 'uni_modules'))
-    if (moduleEntries.length !== 1 || moduleEntries[0] !== 'gio-uniapp-autotracker') throw new Error('release_module_content_mismatch')
+const state = JSON.parse(await readFile(join(dist, 'build-state.json'), 'utf8')) as { sourceHash: string; npm: Record<string, string>; uni: Record<string, string> }
+assert.equal(state.sourceHash, await sourceHash(), '源码或发布配置已变化，请重新构建')
+for (const [directory, expected, channel] of [[npmDir, state.npm, 'npm'], [modulesDir, state.uni, 'uni_modules']] as const) {
+  assert.deepEqual(await hashes(directory), expected, `${channel} 产物被修改或含旧文件`)
+  const entries = await files(directory)
+  for (const required of ['index.js', 'index.d.ts', 'autotrack.js', 'autotrack.d.ts', 'vite.js', 'vite.d.ts', 'vite-runtime.js', 'LICENSE', 'THIRD_PARTY_LICENSES.txt']) assert.ok(entries.includes(required), required)
+  assert.ok(entries.every((file) => !file.endsWith('.ts') || file.endsWith('.d.ts')), '不能交付 TS 源码')
+  assert.ok(entries.every((file) => !/(^|\/)(?:demo|test|scripts|node_modules|\.git|\.env)(?:\/|$)/.test(file)), '包含开发文件')
+  const rootFiles = new Set(['index.js', 'index.d.ts', 'autotrack.js', 'autotrack.d.ts', 'vite.js', 'vite.d.ts', 'vite-runtime.js', 'package.json', 'README.md', 'LICENSE', 'THIRD_PARTY_LICENSES.txt'])
+  assert.ok(entries.every((file) => rootFiles.has(file) || /^(?:core|runtime|platform)\/[a-z0-9-]+\.(?:js|d\.ts)$/.test(file) || /^autotrack\/(?:contract\.(?:js|d\.ts)|vite\.d\.ts)$/.test(file) || /^doc\/[a-z0-9-]+\.md$/.test(file)), '文件不在交付白名单内')
+  const pkg = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8'))
+  assert.equal(pkg.name, sdkName)
+  assert.equal(pkg.version, metadata.version)
+  assert.equal(pkg.private, false)
+  assert.equal(pkg.type, 'module')
+  assert.equal(pkg.dependencies, undefined, '编译器依赖必须随 Vite 工具打包')
+  assert.equal(pkg.devDependencies, undefined)
+  for (const entry of ['.', './vite', './autotrack']) {
+    assert.ok(entries.includes(pkg.exports[entry].types.slice(2)))
+    assert.ok(entries.includes(pkg.exports[entry].import.slice(2)))
   }
-  const actual = new Set(await readdir(output))
-  if (actual.size !== expected.size || [...actual].some((entry) => !expected.has(entry))) throw new Error('release_content_mismatch')
-
-  const packageJson = JSON.parse(await readFile(resolve(output, 'package.json'), 'utf8')) as Readonly<Record<string, unknown>>
-  if (packageJson.name !== 'gio-uniapp-autotracker' || packageJson.type !== 'module' || packageJson.private !== false || packageJson.types !== './index.ts') {
-    throw new Error('release_package_metadata_invalid')
-  }
-  if (JSON.stringify(packageJson.exports) !== JSON.stringify({ '.': './index.ts', './vite': './vite.ts', './autotrack': './autotrack.ts' })) throw new Error('release_exports_invalid')
-  const dependencies = packageJson.dependencies as Readonly<Record<string, unknown>> | null
-  const sourcePackage = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8')) as { dependencies: Record<string, string>; devDependencies: Record<string, string> }
-  if (typeof dependencies !== 'object' || dependencies === null
-    || ['@vue/compiler-dom', '@vue/compiler-sfc', '@babel/parser'].some((name) => typeof dependencies[name] !== 'string' || dependencies[name] !== sourcePackage.dependencies[name])) {
-    throw new Error('release_vite_dependency_mismatch')
-  }
-  // HBuilderX 会替换 Vue 内部模块；编译器与本工程 Vue 必须锁定在同一精确版本。
-  if (dependencies['@vue/compiler-sfc'] !== sourcePackage.devDependencies.vue || dependencies['@vue/compiler-dom'] !== sourcePackage.devDependencies.vue) {
-    throw new Error('release_vue_compiler_version_mismatch')
-  }
-  if ('devDependencies' in packageJson || 'scripts' in packageJson) throw new Error('release_development_metadata_present')
-  process.stdout.write(`release_checked:${outputRelative}\n`)
+  const runtime = await build({ entryPoints: [join(directory, 'index.js'), join(directory, 'autotrack.js')], outdir: 'unused', bundle: true, write: false, platform: 'browser', format: 'esm', metafile: true })
+  assert.ok(Object.keys(runtime.metafile.inputs).every((file) => !file.includes('node_modules/') && !file.endsWith('vite-runtime.js')), '编译依赖进入了 App 运行时')
 }
-
-void main().catch((error: unknown) => {
-  process.stderr.write(`${error instanceof Error ? error.message : 'release_check_failed'}\n`)
-  process.exitCode = 1
-})
+assert.deepEqual(Object.keys(state.npm), Object.keys(state.uni))
+for (const file of Object.keys(state.npm)) {
+  if (file !== 'vite.js' && file !== 'package.json') assert.equal(state.npm[file], state.uni[file], `两种渠道代码不一致:${file}`)
+}
+console.log(`release_checked:${metadata.version}`)

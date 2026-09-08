@@ -52,7 +52,7 @@ for (const file of ['demo/main.ts', 'demo/vite.config.ts']) {
 const vite = readFileSync(resolve(root, 'demo/vite.config.ts'), 'utf8')
 const autoTrack = vite.indexOf('gioUniappAutoTrack')
 const uni = vite.lastIndexOf('uniPlugin()')
-if (autoTrack < 0 || uni < 0 || autoTrack > uni || !vite.includes("runtimeImport: '@/uni_modules/gio-uniapp-autotracker/autotrack.js'")) {
+if (autoTrack < 0 || uni < 0 || autoTrack > uni || !vite.includes('gioUniappAutoTrack()')) {
   throw new Error('demo Vite auto-track plugin must be configured before uni() with the compiled dispatcher import')
 }
 if (!vite.includes("./uni_modules/gio-uniapp-autotracker/vite.js")) {

@@ -2,6 +2,7 @@
   "compilerOptions": {
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
+    "resolveJsonModule": true,
     "target": "ES2022",
     "lib": ["ES2022", "DOM"],
     "strict": true,
@@ -10,5 +11,5 @@
     "skipLibCheck": true
   },
   "include": ["index.ts", "vite.ts", "core/**/*.ts", "runtime/**/*.ts", "platform/**/*.ts", "autotrack/**/*.ts"],
-  "exclude": ["node_modules", "demo", "scripts", "test"]
+  "exclude": ["node_modules", "demo", "scripts", "test", "dist", "release"]
 }

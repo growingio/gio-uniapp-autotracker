@@ -5,7 +5,7 @@
     "declaration": true,
     "declarationMap": false,
     "sourceMap": false,
-    "outDir": "./demo/uni_modules/gio-uniapp-autotracker",
+    "outDir": "./dist/build",
     "rootDir": "."
   },
   "include": [
