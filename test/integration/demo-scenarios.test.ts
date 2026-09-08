@@ -86,7 +86,7 @@ describe('demo scenarios', () => {
     expect(transformed.code).toContain("onAction(&#39;普通点击&#39;)")
     expect(transformed.code).toContain('onInputComplete($event)')
     expect(transformed.code).toContain('eventName:&quot;openURL&quot;')
-    expect(transformed.warnings).toMatchObject([{ code: 'complex_handler' }])
+    expect(transformed.warnings).toEqual([])
     for (const marker of ['currentTarget 无 id', 'v-if 用例', 'v-show 用例', 'data-growing-sensitive', '<uni-link']) {
       expect(source).toContain(marker)
     }
@@ -112,8 +112,8 @@ describe('demo scenarios', () => {
     vi.doMock('../../platform/capabilities.js', () => ({ appCapabilityProfile: () => testAutoTrackProfile }))
     const originalUni = (globalThis as Record<string, unknown>).uni
     const originalGdp = (globalThis as Record<string, unknown>).gdp
-    let hooks: LifecycleHooks | null = null
-    let growingio: TrackerRuntime | null = null
+    let hooks!: LifecycleHooks
+    let growingio!: TrackerRuntime
     const app = { mixin: (next: Readonly<Record<string, unknown>>) => { hooks = next as LifecycleHooks } }
     const received: ProtocolEvent[] = []
     ;(globalThis as Record<string, unknown>).uni = demoHost(received)
@@ -124,13 +124,13 @@ describe('demo scenarios', () => {
       expect(gdp('registerPlugins', [{ name: 'gioEventAutoTracking' }])).toBe(true)
       expect(gdp('registerPlugins', [{ name: 'demo-test-plugin', install: (instance: TrackerRuntime) => { growingio = instance } }])).toBe(true)
       expect(gdp('init', 'demo-account', 'demo-source', { uniVue: app, dataCollect: false, idMapping: true })).toBe(true)
-      expect(globalThis.gdp).toBe(gdp)
-      expect(hooks).not.toBeNull()
-      expect(growingio).not.toBeNull()
+      expect((globalThis as Record<string, unknown>).gdp).toBe(gdp)
+      expect(hooks).toBeDefined()
+      expect(growingio).toBeDefined()
       expect(gdp('registerPlugins', [{ name: 'gioEventAutoTracking' }])).toBe(false)
       expect(gdp('init', 'demo-account', 'demo-source', { uniVue: app, dataCollect: false, idMapping: true })).toBe(false)
 
-      const lifecycle = hooks as LifecycleHooks
+      const lifecycle = hooks
       lifecycle.onLaunch.call({}, { path: 'pages/index/index', query: { campaign: 'demo' } })
       lifecycle.onShow.call({}, { path: 'pages/index/index', query: { campaign: 'demo' } })
       const page = { $mpType: 'page', $page: { route: 'pages/autotrack/autotrack' }, gioPageTitle: '无埋点 / VIEW_CLICK' }
@@ -145,10 +145,10 @@ describe('demo scenarios', () => {
       expect(gdp('setLocation', 91, 120)).toBe(false)
       expect(gdp('track', '', { ignored: true })).toBe(false)
       expect(gdp('setOptions', { dataCollect: true })).toBe(true)
-      const tracker = growingio as TrackerRuntime
+      const tracker = growingio
       await tracker.whenReady()
 
-      expect(gdp('track', 'demo_purchase', { sku: 'demo-sku-001', invalid: { nested: true } })).toBe(true)
+      expect(untypedGdp('track', 'demo_purchase', { sku: 'demo-sku-001', invalid: { nested: true } })).toBe(true)
       expect(gdp('setUserId', 'demo-user-001', 'email')).toBe(true)
       expect(gdp('setUserAttributes', { membership: 'demo', source: 'scenario' })).toBe(true)
       expect(gdp('track', 'demo_purchase_after_identity', { sku: 'demo-sku-002' })).toBe(true)

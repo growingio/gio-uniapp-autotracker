@@ -35,7 +35,7 @@
 | 商品一、商品二 | `sku-1#onListAction` / `sku-2#onListAction`，index 分别为 1、2 |
 | 无 id 列表 | 每项都是 `#onNoIdListAction`，没有结构路径兜底 |
 | `v-if` / `v-show` | 只有实际可见、可达并被点击的按钮产生事件 |
-| 无 id 条件按钮 | 不采集并产生 `complex_handler`；开启时执行业务调用，关闭时只返回函数 |
+| 无 id 条件按钮 | 订阅开关开启时为 `#onAction`，关闭时为 `#onInputComplete`；只执行命中的分支，业务计数增加 1，无编译警告 |
 | Options / `<script setup>` / `setup()` 别名按钮 | 分别使用模板可见 handler 名；页面计数每次只增加 1 |
 | 昵称失焦 / 备注完成 | `nickname#onInputComplete` / `note#onInputComplete`；备注仅 blur 插桩 |
 | 未放行的普通输入 | 生成 `VIEW_CHANGE`，但不包含 `textValue` |

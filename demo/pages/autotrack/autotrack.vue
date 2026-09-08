@@ -46,8 +46,8 @@
       <button v-show="showVShow" id="conditional-show" @tap="onConditionalShow($event)">v-show 当前可见</button>
       <text class="expected">预期：只有可达并被点击时产生 conditional-show#onConditionalShow</text>
 
-      <button @tap="enabled ? onAction('条件分支：开') : onInputComplete">无 id 的条件 handler</button>
-      <text class="expected">预期：包含函数引用的分支保持原行为，整个表达式跳过自动采集；关闭时不会调用 onInputComplete。</text>
+      <button @tap="enabled ? onAction('条件分支：开') : onInputComplete($event)">无 id 的条件 handler</button>
+      <text class="expected">预期：订阅开关开启时为 #onAction，关闭时为 #onInputComplete；只执行命中的分支，业务计数增加 1。</text>
     </view>
 
     <view class="section">
