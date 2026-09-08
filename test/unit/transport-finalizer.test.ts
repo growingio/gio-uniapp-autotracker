@@ -19,6 +19,27 @@ function fakeTimer(): { timer: TimerPort; fire: () => void; cleared: () => boole
 }
 
 describe('dispatchWithFinalizer', () => {
+  it.each(['cancel', 'timeout'] as const)('%s 时宿主 abort 抛错仍只结算一次，迟到回调无效', (action) => {
+    const fake = fakeTimer()
+    const results: TransportResult[] = []
+    let callback!: (result: TransportResult) => void
+    const finalized = dispatchWithFinalizer({ dispatch: (_request, done) => {
+      callback = done
+      return { abort: () => { throw new Error('host abort failure') } }
+    } }, fake.timer, request, result => results.push(result))
+    if (action === 'cancel') finalized.cancel()
+    else fake.fire()
+    callback({ kind: 'success', status: 204 })
+    callback({ kind: 'http', status: 500 })
+    expect(results).toEqual([{ kind: action === 'cancel' ? 'aborted' : 'timeout' }])
+    expect(fake.cleared()).toBe(true)
+  })
+
+  it('非 Error 宿主异常也归一为网络失败', () => {
+    const results: TransportResult[] = []
+    dispatchWithFinalizer({ dispatch: () => { throw 'offline' } }, fakeTimer().timer, request, result => results.push(result))
+    expect(results).toEqual([{ kind: 'network', message: undefined }])
+  })
   it('completes synchronous success once and clears its deadline', () => {
     const fake = fakeTimer()
     const results: TransportResult[] = []

@@ -14,10 +14,9 @@ type HookSet = Readonly<{
 describe('installUniAppLifecycle', () => {
   afterEach(() => vi.unstubAllGlobals())
   it('owns App and Page lifecycle forwarding through one Vue global mixin', () => {
-    let hooks: HookSet | null = null
+    let hooks!: HookSet
     const app: UniAppVueApp = {
       mixin: (options) => { hooks = options as HookSet },
-      config: { globalProperties: {} },
     }
     const calls: Array<readonly [string, unknown]> = []
     const target = {
@@ -32,8 +31,8 @@ describe('installUniAppLifecycle', () => {
     }
 
     installUniAppLifecycle(app, target)
-    expect(hooks).not.toBeNull()
-    const installed = hooks as HookSet
+    expect(hooks).toBeDefined()
+    const installed = hooks
 
     installed.onLaunch.call({}, { path: 'pages/index/index', query: { source: 'launch' } })
     installed.onShow.call({}, { path: 'pages/index/index' })
@@ -66,8 +65,8 @@ function titleFixture() {
   vi.stubGlobal('__uniRoutes', [{ path: '/pages/home', meta: { navigationBar: { titleText: '配置标题' } } }])
   const target = {
     onAppLaunch: () => true, onAppShow: () => true, onAppHide: () => true,
-    onPageLoad: () => true, onPageShow: vi.fn(() => true), onPageHide: () => true, onPageUnload: () => true,
-    onPageTitleChanged: vi.fn(() => true), autoTrack: () => true,
+    onPageLoad: vi.fn(() => true), onPageShow: vi.fn(() => true), onPageHide: () => true, onPageUnload: () => true,
+    onPageTitleChanged: vi.fn(() => true), autoTrack: vi.fn(() => true),
   }
   installUniAppLifecycle({ mixin: value => { hooks = value as HookSet } }, target)
   const page = { $mpType: 'page', $page: { route: 'pages/home' } } as Record<string, unknown>
@@ -77,6 +76,23 @@ function titleFixture() {
 
 describe('自动导航标题', () => {
   afterEach(() => vi.unstubAllGlobals())
+
+  it('缺少当前页面或标题参数时不包装回调，无效页面路由不创建页面桥', () => {
+    const { hooks, interceptor, target, page } = titleFixture()
+    for (const options of [null, [], {}, { title: 1 }]) expect(() => interceptor.invoke(options)).not.toThrow()
+    hooks.onUnload.call(page)
+    const options = { title: '无当前页' }
+    interceptor.invoke(options)
+    expect(options).not.toHaveProperty('success')
+    for (const instance of [{ $mpType: 'page', $page: { route: '/' } }, { $mpType: 'page', __route__: 123 }]) {
+      hooks.onLoad.call(instance, {})
+      hooks.onTabItemTap.call(instance, {})
+    }
+    expect(target.onPageShow).not.toHaveBeenCalled()
+    expect(target.onPageLoad).toHaveBeenCalledOnce()
+    expect(target.autoTrack).not.toHaveBeenCalled()
+    expect(target.onPageTitleChanged).not.toHaveBeenCalled()
+  })
 
   it('配置标题、onLoad 中成功更新的动态标题、显式覆盖按优先级生效', () => {
     const { hooks, interceptor, target, page } = titleFixture()

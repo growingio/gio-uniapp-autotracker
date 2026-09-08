@@ -12,6 +12,12 @@ function api(overrides: Partial<AppStorageApi> = {}): AppStorageApi {
 }
 
 describe('AppStoragePort', () => {
+  it.each([new Error('permission denied'), 'host error'])('写入和删除失败 %s 不向调用方抛错', async (error) => {
+    const storage = new AppStoragePort(api({ setStorageSync: () => { throw error }, removeStorageSync: () => { throw error } }))
+    const failure = { kind: 'failed', message: error instanceof Error ? error.message : undefined }
+    await expect(storage.write('state', 'identity', 'value')).resolves.toEqual(failure)
+    await expect(storage.remove('state', 'identity')).resolves.toEqual(failure)
+  })
   it('is a persistent queue adapter and preserves string-only boundary values', async () => {
     const storage = new AppStoragePort(api({ getStorageSync: () => '{"version":1}' }))
     expect(storage.persistentQueue).toBe(true)

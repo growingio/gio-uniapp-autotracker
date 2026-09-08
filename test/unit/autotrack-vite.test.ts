@@ -18,6 +18,17 @@ function handlers(code: string): string[] {
 const source = (template: string, script = 'export default { methods: { save(e) { return e }, cancel(e) { return e } } }') => `<template>${template}</template><script>${script}</script>`
 
 describe('schema v2 Vue instrumentation', () => {
+  it('静态 picker-view 嵌套文字和注释生成可用选项文案，动态文字回退为下标', () => {
+    const template = '<picker-view data-growing-track @change="save($event)"><picker-view-column><view><text>杭州</text><!-- comment --></view><view>上海</view></picker-view-column></picker-view>'
+    const fixture = mountAutoTrackSfc(source(template), vi.fn())
+    try {
+      expect(fixture.transformed.warnings).toEqual([])
+      expect(handlers(fixture.transformed.code)[0]).toContain('pickerRange:[["杭州","上海"]]')
+      const dynamic = transformAutoTrackTemplate(template.replace('<text>杭州</text>', '{{ label }}'))
+      expect(dynamic.warnings).toEqual([])
+      expect(handlers(dynamic.code)[0]).not.toContain('pickerRange:')
+    } finally { fixture.unmount() }
+  })
   it.each([
     ['save($event)', 'save'], ['actions.save($event)', 'actions.save'],
     ['(event) => save(event)', 'save'], ['function(event) { return save(event) }', 'save'], ['(event) => 42', 'click'], ['count++', 'click'],
@@ -172,7 +183,7 @@ describe('schema v2 Vue instrumentation', () => {
     expect(warnings[0]).toMatch(/page.vue:\d+ event_modifiers/)
     plugin.transform.call({ warn: (warning) => warnings.push(warning) }, '<view/>', 'page.nvue')
     expect(warnings[1]).toContain('page.nvue:0 .nvue_not_instrumented')
-    expect(plugin.transform('const a = 1', 'entry.tsx')).toBeNull()
-    expect(gioUniappAutoTrack({ enabled: false }).transform(source('<button @tap="save($event)"/>'), 'page.vue')).toBeNull()
+    expect(plugin.transform.call(undefined, 'const a = 1', 'entry.tsx')).toBeNull()
+    expect(gioUniappAutoTrack({ enabled: false }).transform.call(undefined, source('<button @tap="save($event)"/>'), 'page.vue')).toBeNull()
   })
 })

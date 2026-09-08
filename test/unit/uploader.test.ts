@@ -35,6 +35,29 @@ function runtime(): { value: UploaderRuntime; fireDelay: (delay: number) => void
 }
 
 describe('Uploader', () => {
+  it('请求构建失败时释放队列并报告原因，不占用上传槽位', async () => {
+    const queue = new EventQueue()
+    queue.enqueue(event(1))
+    const drops: unknown[] = []
+    let sent = false
+    const uploader = new Uploader(queue, { dispatch: () => { sent = true } }, { ...runtime().value, now: () => NaN }, 'https://collector.example', 'account', drop => drops.push(drop))
+    expect(await uploader.forceFlush()).toBe(true)
+    expect(sent).toBe(false)
+    expect(uploader.activeCount()).toBe(0)
+    expect(queue.snapshot()).toEqual([])
+    expect(drops).toEqual([{ requestIds: ['q1'], reason: 'request_build_failed' }])
+  })
+
+  it('日志观察者抛错也必须发送原始事件并正常清空队列', () => {
+    const queue = new EventQueue()
+    queue.enqueue(event(1))
+    const sent: unknown[] = []
+    const uploader = new Uploader(queue, { dispatch: (request, done) => { sent.push(JSON.parse(request.body)); done({ kind: 'success', status: 204 }) } },
+      runtime().value, 'https://collector.example', 'account', undefined, undefined, () => { throw new Error('observer failed') })
+    uploader.flush()
+    expect(sent).toEqual([[event(1)]])
+    expect(queue.snapshot()).toEqual([])
+  })
   it('明确断网时保留事件，后台强制发送也不能消耗队列', async () => {
     let connected = false
     const queue = new EventQueue()

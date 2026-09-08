@@ -3,6 +3,21 @@ import { describe, expect, it } from 'vitest'
 import { BootstrapBuffer } from '../../core/bootstrap-buffer.js'
 
 describe('BootstrapBuffer', () => {
+  it.each(['é', '中文', '😀', '\ud800'])('按实际 UTF-8 字节数限制 %s，包含 JSON 数组开销', (text) => {
+    const bytes = Buffer.byteLength(JSON.stringify([{ text }]), 'utf8')
+    const exact = new BootstrapBuffer({ maxItems: 2, maxBytes: bytes })
+    const short = new BootstrapBuffer({ maxItems: 2, maxBytes: bytes - 1 })
+    expect(exact.push({ text })).toBe(true)
+    expect(short.push({ text })).toBe(false)
+    expect(exact.drain()).toEqual([{ text }])
+    expect(short.drain()).toEqual([])
+  })
+
+  it.each([undefined, () => undefined, Symbol('unsupported'), 1n])('拒绝非 JSON 启动指令 %s', (value) => {
+    const buffer = new BootstrapBuffer()
+    expect(buffer.push(value)).toBe(false)
+    expect(buffer.size()).toBe(0)
+  })
   it('keeps an immutable JSON snapshot in original order until hydration drains it', () => {
     const buffer = new BootstrapBuffer()
     const intent = { type: 'track', name: 'first' }

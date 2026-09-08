@@ -8,6 +8,27 @@ function event(number: number, value = ''): ProtocolEvent {
 }
 
 describe('EventQueue', () => {
+  it.each(['é', '中文', '😀'])('包含 %s 的事件按 UTF-8 字节和数组边界分批', (value) => {
+    const first = event(1, value)
+    const bytes = Buffer.byteLength(JSON.stringify(first), 'utf8')
+    const limits = { maxItems: 5, maxPersistedBytes: 2000, maxEventBytes: bytes, maxBatchEvents: 5, maxBatchBytes: bytes + 2 }
+    const queue = new EventQueue(limits)
+    expect(queue.enqueue(first)).toMatchObject({ ok: true })
+    expect(queue.enqueue(event(2, value))).toMatchObject({ ok: true })
+    expect(queue.claimNextBatch().map(entry => entry.event)).toEqual([first])
+    expect(queue.claimNextBatch().map(entry => entry.event)).toEqual([event(2, value)])
+    expect(queue.claimNextBatch()).toEqual([])
+    queue.release(['q1'])
+    expect(queue.claimNextBatch().map(entry => entry.requestId)).toEqual(['q1'])
+    expect(new EventQueue({ ...limits, maxEventBytes: bytes - 1 }).enqueue(first)).toEqual({ ok: false, code: 'event_too_large' })
+  })
+
+  it.each([undefined, null, [], 1])('拒绝非对象事件 %s，保留已入队事件', (value) => {
+    const queue = new EventQueue()
+    queue.enqueue(event(1))
+    expect(queue.enqueue(value as unknown as ProtocolEvent)).toEqual({ ok: false, code: 'event_not_serializable' })
+    expect(queue.snapshot().map(entry => entry.event)).toEqual([event(1)])
+  })
   it('keeps JSON-only event snapshots in FIFO order and supports retry metadata', () => {
     const queue = new EventQueue()
     expect(queue.enqueue(event(1))).toStrictEqual({ ok: true, requestId: 'q1' })

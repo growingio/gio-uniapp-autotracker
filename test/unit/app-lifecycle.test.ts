@@ -8,7 +8,7 @@ import { PageStore } from '../../core/page-store.js'
 import type { AppSystemContext } from '../../core/ports.js'
 import { EventQueue } from '../../core/queue.js'
 import { SessionManager } from '../../core/session.js'
-import { AppLifecycle } from '../../runtime/app-lifecycle.js'
+import { AppLifecycle, type AppLifecycleDependencies } from '../../runtime/app-lifecycle.js'
 
 const normalized = normalizeInitOptions({ accountId: 'account', dataSourceId: 'source' })
 if (normalized.ok === false) throw new Error('fixture_config_invalid')
@@ -20,7 +20,8 @@ const system: AppSystemContext = {
   deviceType: 'PHONE', appVersion: '1.0.0', language: 'en-US', sdkVersion: '0.1.0',
 }
 
-function createLifecycle(initialCollection = true, initialSession: Readonly<{ sessionId: string; lastCloseTime: number | null }> | null = null) {
+function createLifecycle(initialCollection = true, initialSession: Readonly<{ sessionId: string; lastCloseTime: number | null }> | null = null,
+  overrides: Partial<AppLifecycleDependencies> = {}) {
   let now = 0
   let collect = initialCollection
   let persisted = 0
@@ -42,6 +43,7 @@ function createLifecycle(initialCollection = true, initialSession: Readonly<{ se
     currentPage: () => pages.current(),
     persistSession: () => { persisted += 1 },
     forceFlush: () => { flushed += 1 },
+    ...overrides,
   })
   return {
     lifecycle, queue, sessions, pages,
@@ -52,6 +54,29 @@ function createLifecycle(initialCollection = true, initialSession: Readonly<{ se
 }
 
 describe('AppLifecycle', () => {
+  it('首个会话之前进入后台不产生 APP_CLOSED，存储和强制上传异常被隔离', () => {
+    const { lifecycle, queue } = createLifecycle(true, null, {
+      persistSession: () => { throw new Error('storage failed') },
+      forceFlush: () => { throw new Error('flush failed') },
+    })
+    expect(lifecycle.onHide()).toEqual({ session: null, appClosedQueued: false })
+    expect(lifecycle.onShow({ path: '', query: null }).visitQueued).toBe(true)
+    expect(lifecycle.onHide().appClosedQueued).toBe(true)
+    expect(queue.snapshot().map(entry => entry.event.eventType)).toEqual(['VISIT', 'APP_CLOSED'])
+    expect(lifecycle.entry().current).toEqual({ path: null, query: null })
+  })
+
+  it('无入口上下文时恢复采集和切换用户安全生成 VISIT，关闭采集时不生成', () => {
+    const { lifecycle, queue, setCollection } = createLifecycle(false)
+    expect(lifecycle.onUserChanged()).toBe(false)
+    expect(lifecycle.onCollectionResumed().visitQueued).toBe(false)
+    expect(lifecycle.onHide().appClosedQueued).toBe(false)
+    expect(queue.snapshot()).toEqual([])
+    setCollection(true)
+    expect(lifecycle.onCollectionResumed().visitQueued).toBe(true)
+    expect(lifecycle.onUserChanged()).toBe(true)
+    expect(queue.snapshot().map(entry => entry.event.eventType)).toEqual(['VISIT', 'VISIT'])
+  })
   it('records launch without a duplicate VISIT, then sends the onShow entry', () => {
     const { lifecycle, queue } = createLifecycle()
     lifecycle.onLaunch({ path: '/launch', query: 'from=launch' })

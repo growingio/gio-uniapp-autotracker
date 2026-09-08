@@ -7,6 +7,20 @@ import { BootstrapBuffer } from '../../core/bootstrap-buffer.js'
 const options = { accountId: 'account', dataSourceId: 'source' }
 
 describe('TrackerEventGate', () => {
+  it('未初始化的生命周期和重复 release 被拒绝，就绪后的派发异常被隔离', () => {
+    const lifecycle = new TrackerLifecycle()
+    const gate = new TrackerEventGate(lifecycle)
+    const intent = { kind: 'app-show', payload: {} }
+    expect(gate.submitLifecycle(intent, () => true)).toBe(false)
+    expect(gate.release(() => true)).toBe(false)
+    lifecycle.init(options)
+    expect(gate.release(() => true)).toBe(true)
+    expect(gate.release(() => true)).toBe(false)
+    const fail = () => { throw new Error('emitter failure') }
+    expect(gate.submit({ kind: 'track', payload: {} }, fail)).toBe(false)
+    expect(gate.submitLifecycle(intent, fail)).toBe(false)
+    expect(gate.submit({ kind: 'track', payload: {} }, () => true)).toBe(true)
+  })
   it('业务字节容量耗尽仍接收生命周期，按跨缓冲原始顺序回放', () => {
     const lifecycle = new TrackerLifecycle()
     const gate = new TrackerEventGate(lifecycle, new BootstrapBuffer({ maxItems: 50, maxBytes: 200 }))

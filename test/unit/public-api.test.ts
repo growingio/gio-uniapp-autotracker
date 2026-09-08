@@ -6,6 +6,8 @@ describe('public API', () => {
   it('keeps build-time Vite integration out of the App runtime entry', async () => {
     const runtimeApi = await import('../../index.js')
     expect(runtimeApi).not.toHaveProperty('gioUniappAutoTrack')
+    const compilerApi = await import('../../vite.js')
+    expect(compilerApi.gioUniappAutoTrack().name).toBe('gio-uniapp-autotrack')
   })
 
   it('exposes only the mini-program-style command entry, not host or identity factories', async () => {

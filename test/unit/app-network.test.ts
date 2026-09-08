@@ -5,6 +5,20 @@ import { AppNetworkPort, normalizeAppNetworkState } from '../../platform/app-net
 describe('AppNetworkPort', () => {
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
 
+  it('查询、Native 回退、订阅和取消订阅抛错时保持可用', async () => {
+    vi.stubGlobal('plus', { networkinfo: { getCurrentType: () => { throw new Error('native failed') } } })
+    const port = new AppNetworkPort({
+      getNetworkType: () => { throw new Error('query failed') },
+      onNetworkStatusChange: () => { throw new Error('subscribe failed') },
+    })
+    expect(await port.current()).toBe('UNKNOWN')
+    expect(port.isConnected()).toBeNull()
+    expect(() => port.subscribe(() => undefined)()).not.toThrow()
+    const removable = new AppNetworkPort({ getNetworkType: () => undefined, onNetworkStatusChange: () => undefined,
+      offNetworkStatusChange: () => { throw new Error('unsubscribe failed') } })
+    expect(() => removable.subscribe(() => undefined)()).not.toThrow()
+  })
+
   it('明确断网与类型未知分别保留，未知代际也可以明确联网', async () => {
     let listener!: (result: { networkType?: unknown; isConnected?: unknown }) => void
     const port = new AppNetworkPort({ getNetworkType: options => options.success({ networkType: 'none' }), onNetworkStatusChange: next => { listener = next } })

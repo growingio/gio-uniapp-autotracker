@@ -23,7 +23,7 @@ const system: AppSystemContext = {
   deviceType: 'PHONE', appVersion: '1.0.0', language: 'zh-CN', sdkVersion: '0.1.0',
 }
 
-function createComposer(overrides: Partial<{ clock: () => number; identity: () => Identity }> = {}) {
+function createComposer(overrides: Partial<{ clock: () => number; identity: () => Identity; timezone: () => number; network: () => AppSystemContext['networkState'] }> = {}) {
   const sessions = new SessionManager(config.sessionPolicy, () => 'session-1')
   sessions.resume(1)
   const queue = new EventQueue()
@@ -37,13 +37,25 @@ function createComposer(overrides: Partial<{ clock: () => number; identity: () =
     sequence,
     queue,
     { now: overrides.clock ?? (() => 1234) },
-    { getOffsetMinutes: () => -480 },
+    { getOffsetMinutes: overrides.timezone ?? (() => -480) },
     location,
+    overrides.network,
   )
   return { composer, queue, sequence, location }
 }
 
 describe('EventComposer', () => {
+  it('系统时钟抛错时拒绝事件，不入队也不消耗序列号', () => {
+    const { composer, queue, sequence } = createComposer({ clock: () => { throw new Error('clock failed') } })
+    expect(composer.compose({ eventType: 'VISIT' })).toEqual({ ok: false, code: 'invalid_timestamp' })
+    expect(queue.snapshot()).toEqual([])
+    expect(sequence.current()).toEqual({ eventSequenceId: 0 })
+  })
+
+  it.each([() => NaN, () => { throw new Error('timezone failed') }])('时区读取异常时使用 0，网络读取异常时保留系统快照', (timezone) => {
+    const { composer } = createComposer({ timezone, network: () => { throw new Error('network failed') } })
+    expect(composer.compose({ eventType: 'VISIT' })).toMatchObject({ ok: true, event: { timezoneOffset: '0', networkState: 'WIFI' } })
+  })
   it('builds and queues VISIT with trusted common context and a shared sequence', () => {
     const { composer, queue, sequence, location } = createComposer()
     location.set(30.2, 120.1)
