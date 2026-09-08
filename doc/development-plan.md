@@ -91,7 +91,7 @@
 ### 工作项
 
 1. 在 `core/ports.ts` 定义 `StoragePort`、`TransportPort` 与各自标准结果；在 `platform/uni.ts` 实现 system、network、scheduler、logger；一期实现 `platform/app-storage.ts` 与 `platform/app-request.ts`，分别归一化 `uni` storage 异常/容量失败和 `uni.request` 的 success/fail/complete、requestTask.abort、同步异常。
-2. 实现有界内存队列、条数 / 字节上限和 drop reason：bootstrap buffer 为 50 条或 256KB，App 持久化队列为 200 条或 2MB；任一上限满时保留旧事件、丢弃新事件。`KB` / `MB` 均按 1024 换算，统一使用 UTF-8 编码后 `JSON.stringify` 的真实字节数：buffer 为完整数组、queue 为含 retry 元数据的完整持久化 envelope。仅 App 三端实现持久化快照与冷启动恢复，Web/小程序未来仅复用内存队列和当前运行期重试；`dataCollect` 由开关前置阻止后续事件生成，不清空历史队列、identity、session 或序号，也不取消既有上传任务。
+2. 实现有界内存队列、条数 / 字节上限和 drop reason：业务/状态指令与生命周期使用独立 bootstrap buffer，各为 50 条或 256KB，合计最多 100 条或 512KB，释放时按接收顺序合并；App 持久化队列为 200 条或 2MB；任一上限满时保留旧事件、丢弃新事件。`KB` / `MB` 均按 1024 换算，统一使用 UTF-8 编码后 `JSON.stringify` 的真实字节数：buffer 为完整数组、queue 为含 retry 元数据的完整持久化 envelope。仅 App 三端实现持久化快照与冷启动恢复，Web/小程序未来仅复用内存队列和当前运行期重试；`dataCollect` 由开关前置阻止后续事件生成，不清空历史队列、identity、session 或序号，也不取消既有上传任务。
 3. 实现 uploader：core 自己控制单请求 finalizer 与 deadline、每批最多 50 条和 512KB、最多 3 个并发、最多 2 次重试（800ms、1600ms，均 ±20% 抖动）、4xx 不重试、5xx/网络错误退避；单条超过 512KB 的事件记录 `event_too_large` 后直接丢弃。batch 上限按实际 HTTP JSON 数组 body 的 UTF-8 字节数计算，包含数组括号与分隔符。请求固定为 `POST {serverUrl}/v3/projects/{accountId}/collect?stm={sendAt}&compress=0`，使用 `Content-Type: application/json` 与 `Accept: application/json`，Body 为清理后的 JSON 事件数组；禁止在 core 直接调用任何宿主请求 API。
 4. 实现冷启动恢复、网络恢复 flush 与前后台最长 1 秒 force flush；一期没有公开或内部 `destroy()` 生命周期。
 5. 实现 init 期固定的 `debug` 日志：所有模式下用小程序同款 `[GrowingIO]：` 的 `info` / `success` / `warn` / `error` 输出初始化、参数/插件提示和请求失败；仅 `debug=true` 时额外输出 App/Page/action 热路径，以及发送前已清理、移除 SDK 内部元数据后的完整事件 JSON 数组，前缀固定为 `[GrowingIO Debug]:`。debug 不得改变采集/隐私语义，也不支持运行时修改；公开 diagnostics 查询 API 放入二期。
@@ -113,7 +113,7 @@
 ### 工作项
 
 1. 实现 `runtime/app-lifecycle.ts`，并提供 `App.vue` 的显式 `onLaunch/onShow/onHide` 接入方式。
-2. 实现 `runtime/page-lifecycle.ts` 与 `page-snapshot.ts`；Page 生命周期只传 `route`、query、title、pageKey、冻结的 `referralPage` 等纯快照。前序页面 route 优先；无前序页时才允许使用平台入口来源，小程序为 `referrerInfo.appId` / `scn:...`，App 没有已验证来源则省略。
+2. 实现 `runtime/page-lifecycle.ts` 与 `page-snapshot.ts`；Page 生命周期只传 `route`、query、title、pageKey、当前 `referralPage` 等纯快照。前序页面 route 优先；无前序页时才允许使用平台入口来源，小程序为 `referrerInfo.appId` / `scn:...`，App 没有已验证来源则省略。
 3. 实现 PAGE 专用 `OrientationPort`：每条 PAGE 先读取标准 deviceOrientation，再在可证实时由当前窗口宽高推断，最后复用本进程最后一个真实值；三者均不可用时以 `PORTRAIT` 兜底，仍构建 PAGE 并分配序号，不能因方向接口异常漏采页面。
 4. 验证 Vue3 Options API、Composition API、Tab 页、重复入栈同 route、返回上一页和前后台切换。
 5. 实现 `VISIT`、`PAGE`、`APP_CLOSED` 的运行时调度，确保 `APP_CLOSED` 不从 Page hide 推断。每次真实 `Page:onShow` 自动发送 `PAGE`，并维护页面快照供其他事件使用；一期不实现 `trackPage` 开关或 `sendPage()`。
@@ -175,10 +175,10 @@
 ### 工作项
 
 1. 提供初始化、App.vue 生命周期接入、Vue 3 / Vite 插件、隐私开关、支持矩阵和降级说明；1.0 仅面向 Android、iOS、HarmonyOS App，明确 Vue 2 / Webpack、H5 和各家小程序为后续能力。
-2. 生成 release 目录，其中仓库根内容被包装为 `uni_modules/gio-uniapp-autotracker/`；不得将该嵌套用于日常源码目录。
+2. 同一次构建生成 `dist/npm` 与 `dist/uni_modules/gio-uniapp-autotracker/`，最终压缩包位于 `dist/release`，生成文件不提交 Git；不得将该嵌套用于日常源码目录。
 3. 用干净的 demo 工程重新安装 / 复制 release 包，运行 typecheck、编译和三端验证；HarmonyOS 与 Android/iOS 同为 1.0 正式支持端，缺少任一端真机证据不得发布。
 4. 输出 platform capability matrix、自动化测试结果、真机日志摘要、请求摘要和服务端接收证据；每项标明版本、目标端、HBuilderX / 编译器版本、SDK 包版本和验证日期。
-5. 检查 release 包内容：只包含 SDK 源码、构建入口、类型、文档和示例；不得包含 demo、测试记录、mock collector、内部配置或任何凭据。运行时 SDK 与 Vite 插件若分 entry，必须使用同一版本。
+5. 检查 release 包内容：只包含编译后的 ESM JS、类型、Vite 入口、文档与许可证；不得包含 demo、测试记录、mock collector、内部配置或任何凭据。运行时 SDK 与 Vite 插件若分 entry，必须使用同一版本。
 
 ### 发布门槛
 

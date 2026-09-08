@@ -127,7 +127,7 @@ type NormalizedAutoTrackCall =
     }>
 ```
 
-`elementType` 只允许 Vite 从白名单内置组件写入稳定的小写组件名；`pickerRange` 对 picker 只允许有界一维 JSON 数组，对 picker-view 只允许按列组织的有界二维 JSON 数组，`pickerRangeKey` 只允许非空字符串。实现边界为 range 总计最多 1000 项、picker-view 最多 20 列、对象项最多 32 个标量属性，拒绝嵌套对象和访问器；picker-view 的文案或下标统一以 `||` 连接。编译器从固定 picker-view-column 的静态文本或单层 v-for 标量/对象字段读取 range，复杂列渲染只保留规范下标回退。原始 change payload 不重复塞进 probe，而是由 dispatcher 从第二参数 native event 中即时裁出 `detail.value/current/source`、`target.value`、`target.attr.value` 等受限快照。它们只用于 runtime 的 change 值归一化，不能直接作为协议字段或绕过 `data-growing-track`。picker 优先使用合法 range 中的显示值，无法解析时才保留原始下标；switch 必须保留布尔值语义，swiper 仍按 autoplay 与 `data-title` 规则处理。
+`elementType` 只允许 Vite 从白名单内置组件写入稳定的小写组件名；`pickerRange` 对 picker 只允许有界一维 JSON 数组，对 picker-view 只允许按列组织的有界二维 JSON 数组，`pickerRangeKey` 只允许非空字符串。实现边界为 range 总计最多 1000 项、picker-view 最多 20 列、对象项最多 32 个标量属性，拒绝嵌套对象和访问器；picker-view 的文案或下标统一以 `||` 连接。编译器只复制固定 picker-view-column 的静态文本或字面量 v-for range；动态 range、复杂列渲染只保留规范下标回退，不在事件阶段重复求值业务绑定。原始 change payload 不重复塞进 probe，而是由 dispatcher 从第二参数 native event 中即时裁出 `detail.value/current/source`、`target.value`、`target.attr.value` 等受限快照。它们只用于 runtime 的 change 值归一化，不能直接作为协议字段或绕过 `data-growing-track`。picker 优先使用合法 range 中的显示值，无法解析时才保留原始下标；switch 必须保留布尔值语义，swiper 仍按 autoplay 与 `data-title` 规则处理。
 
 Vite 只能生成 `TemplateAutoTrackProbe`，page lifecycle bridge 只能生成 `TabBarAutoTrackProbe`；normalizer 产出的 `NormalizedAutoTrackCall` 才能进入 `EventDispatcher`。ignore、敏感、未授权的 change 值等策略在生成 normalized call 前完成：被拒绝的 probe 直接返回 `false`，不能以 `ignored` / `sensitive` 标志继续向下游传递。分类型 union 也保证 `VIEW_CHANGE` 在类型层面没有 `index`、`hyperlink`。版本不匹配、source 与字段组合不匹配、空事件名、非白名单 `elementType`、超限数组或非法 host 值均安全返回 `false`，并只产生脱敏 debug 诊断。原始 native event 仍作为 dispatcher 的瞬时第二参数传入；其 `type`、`timeStamp`、`currentTarget`、`target`、`detail` 只在本次调用内读取，不进入 probe、日志、队列或协议事件。
 
@@ -137,30 +137,33 @@ Vite 只能生成 `TemplateAutoTrackProbe`，page lifecycle bridge 只能生成 
 
 ### 4.1 推导规则
 
-Vite 先使用 `@vue/compiler-sfc.parse()` 取得完整 template block 和准确源码偏移，再使用 Vue template AST 查找静态 `v-on`，最后使用事件表达式 AST 推导名称。不能再用 `/<template>(.*?)<\/template>/` 一类正则提取 SFC；它会在嵌套 `<template v-for>`、`<template v-if>` 或 slot template 的第一个闭合标签处提前截断。实现采用与 uni-app x 相同的“可读成员路径”规则，并把 `@vue/compiler-sfc`、`@vue/compiler-dom`、`@babel/parser` 都作为 SDK 构建侧运行依赖。
+Vite 先使用 `@vue/compiler-sfc.parse()` 取得完整 template block 和准确源码偏移，再使用 Vue template AST 查找静态 `v-on`，最后使用事件表达式 AST 推导名称。不能再用 `/<template>(.*?)<\/template>/` 一类正则提取 SFC；它会在嵌套 `<template v-for>`、`<template v-if>` 或 slot template 的第一个闭合标签处提前截断。实现采用与 uni-app x 相同的“可读成员路径”规则，将 `@vue/compiler-sfc`、`@vue/compiler-dom`、`@babel/parser` 随 Vite 工具打包，不进入 App 运行时。
 
 | 表达式 | 传入的 `eventName` | 说明 |
 |---|---|---|
-| `@tap="submit"` | `submit` | 直接方法引用 |
+| `@tap="submit"` | 不插桩 | 保留 Vue 对函数引用的求值、缓存和调用语义 |
 | `@tap="submit(item)"` | `submit` | 取 CallExpression 的 callee |
-| `@click="actions.save"` | `actions.save` | 非计算成员路径 |
+| `@click="actions.save"` | 不插桩 | 不额外读取 getter 或改写引用 |
 | `@click="actions.save(item)"` | `actions.save` | 非计算成员调用 |
-| `@click="ready ? save : cancel"` | `save` 或 `cancel` | 按运行时命中的分支分别插入 probe |
+| `@click="ready ? save : cancel"` | 不插桩 | 原表达式返回函数，绝不能改成调用 |
+| `@click="ready ? save($event) : cancel($event)"` | `save` 或 `cancel` | 条件只求值一次，保持原分支执行 |
 | `@click="(event) => save(event)"` | `save` | 可从匿名表达式内找到唯一可读方法路径 |
 | 无可读方法路径但可安全改写 | 对应静态原生事件名，如 `click` / `tap` / `change` | 与 uni-app x 的明确 fallback 一致 |
 | `v-on:[name]`、无 handler、无法安全改写 | 不插桩 | 保留原表达式并给出 warning |
 
-计算属性路径（如 `actions[key]`）不能伪造成 `actions.key`，一期直接按 `complex_handler` 跳过，不以原生事件名冒充一个动态业务 handler。条件表达式必须重写为“条件只求值一次 → 选择分支 → 先派发该分支名 → 调用原 listener”，不能在条件外预先报固定的 `save` 或 `cancel`。所有重写保持：原 handler 一次调用、原 `$event` 参数、返回值、抛错和求值次数不变；SDK 自己的异常只在 dispatcher 内吞掉。
+计算属性路径（如 `actions[key]`）不能伪造成 `actions.key`，一期直接按 `complex_handler` 跳过，不以原生事件名冒充一个动态业务 handler。支持的条件表达式按“条件只求值一次 → 选择分支 → 派发该分支名 → 执行原表达式”处理，不能在条件外预先报固定的 `save` 或 `cancel`。所有重写保持：原 handler 一次调用、完整参数列表、this、arguments、返回值、抛错和求值次数不变；SDK 探针及元数据求值异常隔离，不得影响后续业务表达式。
 
 Options API、普通 `setup()` 与 `<script setup>` 的最终事件口径相同，但代码生成路径必须分开验证，不能用一个字符串前缀覆盖全部场景：
 
 | 原 listener 形态 | 插桩要求 |
 |---|---|
-| 纯方法引用 `@click="submit"` | probe 后显式调用模板解析到的 `submit($event)`，不能只留下函数引用 |
+| 纯方法引用 `@click="submit"` | 原样保留，不插桩并输出 `complex_handler` |
 | 内联调用 `@click="submit(item)"` | probe 后执行原表达式一次，参数和返回/抛错保持不变 |
-| 箭头或函数表达式 | 先构造原 listener，再以原 `$event` 调用一次；不能只返回函数对象 |
+| 箭头或函数表达式 | 保留原函数与参数，仅在函数体插入探针；异步、生成器、无首参数、解构首参数、严格模式指令等不支持写法原样跳过 |
 | 顶层条件表达式 | 条件只求值一次，probe 与业务调用必须命中同一分支 |
 | 计算成员、嵌套条件、多语句歧义表达式 | 保留原代码，输出 `complex_handler`，一期不插桩 |
+
+普通 Options / setup 组件仅向可静态确认的 methods 字面量插入独立名称，不复制组件对象、不改写 setup 的返回值。导出变量、工厂调用、动态 methods、顶层 spread / 计算选项等输出 `complex_component_options` 并保持整份 SFC 原样。
 
 注入 import 时必须根据 SFC 的 script、script setup 和 template bindings 选择不冲突的局部别名，不能固定假设 `__gioAutoTrack` 未被业务占用。幂等判断也必须识别 SDK 自己生成的 import/调用标记，不能用全文 `includes()`，避免业务注释或字符串导致整页漏插桩。
 
@@ -381,3 +384,8 @@ HarmonyOS 任一 `VIEW_CHANGE` 组件不能证明事件到达、值归一、业�
 3. 静态、单元、集成和 release 检查通过；
 4. Android、iOS、HarmonyOS 对每项已宣传能力都有编译、真机请求和 collector / 服务端接收证据；
 5. 未验证能力在 capability profile、README 和发布说明中明确禁用，不以代码存在或 mock collector 成功代替端侧验收。
+
+
+## 业务行为保护补充
+
+动态 `data-title`、`data-index`、`data-src` 和隐私标记依赖原生事件的 dataset；编译器仅复制无副作用的字面量。动态 href 不会在点击时再次读取，需采集时可在业务模板中明确声明 `data-src`。不应为增加采集范围而把客户原有函数引用改成调用。源码转换前后使用真实 Vue listener 对照验证参数、this、返回值、异常、条件/元数据 getter 次数和组件选项 getter 时机；不支持的写法保持整份表达式或 SFC 原样。

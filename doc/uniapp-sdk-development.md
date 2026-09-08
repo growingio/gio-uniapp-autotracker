@@ -506,7 +506,7 @@ type PageSnapshot = {
 
 `pageKey` 应与**页面实例**绑定，而不只是 route：同一路由连续打开两次时，两个页面仍是不同实例。生命周期去重也必须按 `pageKey + lifecycle` 完成，避免前一页面 50ms 内的 `onShow` 吞掉后一页面。
 
-`referralPage` 只写入 `PAGE`，并在 page snapshot 建立时冻结。普通页面跳转、返回和 tab 切换时，取刚刚可见的上一页面 route；同 route 的不同实例仍按不同 `pageKey` 处理。从后台回到同一页面不是一次页面跳转，不能把当前 route 写成自己的 referral。没有上一页时，可使用平台入口来源：小程序 profile 与既有 SDK 一致，依次取外部小程序 `referrerInfo.appId`、规范化场景值 `scn:...`；App profile 只有在生命周期适配器给出已验证的外部入口来源时才可使用，否则省略，绝不伪造小程序 scene。入口来源只作为首个没有前序页面的 PAGE fallback，前序 PAGE route 始终优先。
+`referralPage` 只写入 `PAGE`；显式来源与 onLoad query 保持快照，自动来源在页面真实切换时刷新。普通页面跳转、返回和 tab 切换时，取刚刚可见的上一页面 route；同 route 的不同实例仍按不同 `pageKey` 处理；通过页面实例判断切换，返回先前打开的同路由实例也更新自动来源。从后台回到同一页面不是一次页面跳转，不能把当前 route 写成自己的 referral。没有上一页时，可使用平台入口来源：小程序 profile 与既有 SDK 一致，依次取外部小程序 `referrerInfo.appId`、规范化场景值 `scn:...`；App profile 只有在生命周期适配器给出已验证的外部入口来源时才可使用，否则省略，绝不伪造小程序 scene。入口来源只作为首个没有前序页面的 PAGE fallback，前序 PAGE route 始终优先。
 
 `orientation` 是 PAGE 的 App 必填专有字段，不进入 `PageSnapshot`、storage 或全局静态 `SystemContext`。`OrientationPort` 在构建每条 PAGE 时读取当前方向：先读标准 `uni.getDeviceInfo()` / `uni.getSystemInfoSync()` 的 `deviceOrientation`，其次仅在当前窗口宽高能够明确判断时推断，最后复用**本次运行内**最后一个真实读取结果，统一输出 `PORTRAIT` 或 `LANDSCAPE`。三者都不可用时固定以 `PORTRAIT` 兜底，照常构建并分配该 PAGE 的 `eventSequenceId`；不得因方向接口的偶发异常漏掉 PAGE。正常真机路径仍必须证明能读取到真实方向，兜底只能是异常路径，不得替代平台适配。
 
@@ -641,7 +641,7 @@ Vite 插件不得直接构建网络事件，它只调用 runtime 的稳定 schem
 
 `track(eventName, properties)` 仅接受满足 `^[A-Za-z_][A-Za-z0-9_]{0,99}$` 的事件名：首字符为英文字母或下划线，剩余字符只能是英文字母、数字或下划线，总长不超过 100。非法名称不做 trim、替换或截断，整条 CUSTOM 返回 `false`、记录脱敏诊断，也不分配 `eventSequenceId` 或进入 queue。
 
-普通页面的 query 在 `Page:onLoad` 只读取一次并绑定到该 pageKey。随后构建 `PAGE`、`VIEW_CLICK`、`VIEW_CHANGE`、`CUSTOM` 和 `APP_CLOSED` 时，若仍有当前页面上下文，均复用该快照；`VISIT` 则只使用 `App:onShow` 收到的入口 path/query，不能拿当前页面 query 冒充入口。`PAGE.referralPage` 也只读取该 pageKey 冻结的值，不在后续事件中扩散。该规则与小程序 SDK 的“页面上下文 + 启动入口”两条链路一致。
+普通页面的 query 在 `Page:onLoad` 只读取一次并绑定到该 pageKey。随后构建 `PAGE`、`VIEW_CLICK`、`VIEW_CHANGE`、`CUSTOM` 和 `APP_CLOSED` 时，若仍有当前页面上下文，均复用该快照；`VISIT` 则只使用 `App:onShow` 收到的入口 path/query，不能拿当前页面 query 冒充入口。`PAGE.referralPage` 读取当前显示快照的来源值，不在后续事件中扩散。该规则与小程序 SDK 的“页面上下文 + 启动入口”两条链路一致。
 
 `setLocation(latitude, longitude)` 不触发定位、不申请定位权限，只接受业务已合法获得的位置。两个参数必须是有限数字，纬度范围为 `[-90, 90]`、经度范围为 `[-180, 180]`，因此 `0` 是合法坐标而不是“未设置”。设置成功后，坐标进入后续事件的 Protocol context；`clearLocation()` 或进程重启后不再携带。位置仅保存于当前运行期内存，绝不写入 SDK storage，也不影响已入队事件。
 
@@ -728,9 +728,9 @@ interface StoragePort {
 { "version": 1, "expiresAt": null, "value": { "...": "..." } }
 ```
 
-对外 `init()` 仍同步完成参数校验和实例创建，但 tracker 在 state 和 SystemContext hydration 完成前处于 `initializing`：不能先生成新的 visitor 再读取旧 visitor，也不能先发缺少设备/网络 context 的首屏报文。这段时间产生的生命周期/业务事件放入 bootstrap buffer，最多 50 条或 256KB 序列化 JSON；任一上限达到时保留已有事件、丢弃新事件并记录 `bootstrap_buffer_full`。identity/session/meta 与 SystemContext 都完成后，按原发生顺序构建并入队；存储不可用时才生成仅当前进程有效的 visitor，并记录诊断。
+对外 `init()` 仍同步完成参数校验和实例创建，但 tracker 在 state 和 SystemContext hydration 完成前处于 `initializing`：不能先生成新的 visitor 再读取旧 visitor，也不能先发缺少设备/网络 context 的首屏报文。这段时间的业务事件与身份/位置指令共用一个 bootstrap buffer，生命周期使用独立 buffer；两者各自最多 50 条或 256KB 序列化 JSON，合计上限为 100 条或 512KB。各缓冲满时保留已有项、拒绝新项，业务突发不能挤掉首次 App/Page 生命周期；释放时按共同的接收顺序合并回放。属性先按统一规则规范化，再保存 JSON 快照，避免 undefined、非有限数字或 Date 在初始化前后改变语义。identity/session/meta 与 SystemContext 都完成后，按原发生顺序构建并入队；存储不可用时才生成仅当前进程有效的 visitor，并记录诊断。
 
-`SystemContextPort` 一次性解析 Protocol 要求的 App context：`platform`、`platformVersion`、`domain`、`appState`、`appName`、`networkState`、屏幕、品牌/型号/类型、语言、`sdkVersion` 与安装包 `appVersion`；`timezoneOffset` 是每条事件的动态 context，不固化在该快照。`platform` 由 App profile 固定映射为 `iOS`、`Android`、`HarmonyOS`，绝不透传 uni 的原始字符串；无法识别目标 App 平台或落在 H5/小程序等非一期宿主时，初始化失败并记录 `unsupported_platform`。`platformVersion` 正常时只取系统真实版本号、去掉首尾空白但不改写格式；读取失败、空白或异常时写 `UNKNOWN` 并记录 `platform_version_unavailable`，继续采集且不提供业务覆盖入口。`domain` 必须由 `uni.getAppBaseInfo()` 的 iOS `bundleId`、Android `packageName` 或 HarmonyOS `bundleName` 得到，不提供业务配置或覆盖入口；不可用时先写空字符串并记录 `domain_unavailable`。屏幕尺寸优先由 `uni.getDeviceInfo()` 读取，失败再使用 `uni.getSystemInfoSync()` 的设备 `screenWidth/screenHeight`，绝不用随页面变化的 window 尺寸；两个值均须为正整数，统一写为 `screenWidth=min(rawWidth, rawHeight)`、`screenHeight=max(rawWidth, rawHeight)`，因此横竖屏不会把同一设备拆成两种尺寸。两级读取后仍无有效值时宽高均写 `0` 并记录 `screen_size_unavailable`，不阻塞初始化。`deviceType` 只允许 `PHONE`、`PAD`、`FOLD`、`UNKNOWN`：iOS `iPhone` / `iPad` 映射为前两者，Android 保留同名类型，HarmonyOS 使用其设备类型映射；取不到或不能可靠映射时写 `UNKNOWN` 并记录 `device_type_unknown`，不阻塞采集。`deviceBrand`、`deviceModel` 不作跨端改名，正常时保留系统原值；空、异常或不可用时均写 `UNKNOWN`，分别记录 `device_brand_unavailable`、`device_model_unavailable`，不阻塞采集。`appName` 只取同一 API 的 `appName`，不可覆盖；读取失败统一写空字符串并记录 `app_name_unavailable`，与独立 Android/iOS SDK 的 best-effort 行为对齐。`language` 优先读取标准 App 信息中的 `appLanguage`，其次 `language`；App 统一转换为 BCP 47（`_` 转 `-`，语言小写、script 首字母大写、region 大写），只读到 `zh` 则保留 `zh`，不擅自补成 `zh-Hans` 或 `zh-CN`；取不到或无法解析时写 `und` 并记录 `language_unavailable`。每条新事件通过 `TimezonePort` 读取标准 `Date.getTimezoneOffset()` 并转为字符串，采用“本地时间转 UTC 所需增加分钟数”的统一口径（中国 `-480`）；系统时区或夏令时变化只影响后续事件。读取抛错、非有限数或无法转为整数时写 `0` 并记录 `timezone_offset_unavailable`，不阻塞采集。`appVersion` 优先读取 `uni.getAppBaseInfo().version` 等标准 App 信息；读取失败才使用 `ResolvedGioConfig.appVersionFallback` 的非空值；两者都不可用时写空字符串并记录 `app_version_unavailable`，继续采集，不能伪造 `1.0.0`。网络查询使用固定短 deadline；将宿主返回的 `wifi`、`2g`、`3g`、`4g`、`5g` 规范为 `WIFI`、`2G`、`3G`、`4G`、`5G`，`none`、`unknown`、泛化 `cellular`、超时、错误或宿主不可用都写 `UNKNOWN` 并记录诊断，绝不猜测代际。初始化完成首读后订阅网络状态变化，二者只更新后续事件的 snapshot；离线事件照常入队，网络恢复才触发 flush。事件 builder 完成字段白名单和系统兜底后，统一调用 `sanitizeOutboundEvent`：它在入队、持久化和发送前移除 `null`、`undefined`、空字符串、空对象和空数组，保留数值 `0`；因此 `domain`、`appName`、无 fallback 的 `appVersion` 等读取失败时不会伪造值，也不会把空字段发给 collector。`attributes` 已经被属性 normalizer 转为字符串 map，其中 `"false"` 不是空值。首个 `VISIT`、首个 `PAGE` 和 buffer 中任何手动/无埋点事件都使用同一份就绪后的稳定 context snapshot 与各自构建时的 timezone；后续网络或时区变化只更新未来事件，不回写已入队事件。`appState` 是生命周期驱动的未来事件快照，不能永久沿用启动时的值。
+`SystemContextPort` 一次性解析 Protocol 要求的 App context：`platform`、`platformVersion`、`domain`、`appState`、`appName`、`networkState`、屏幕、品牌/型号/类型、语言、`sdkVersion` 与安装包 `appVersion`；`timezoneOffset` 是每条事件的动态 context，不固化在该快照。`platform` 由 App profile 固定映射为 `iOS`、`Android`、`HarmonyOS`，绝不透传 uni 的原始字符串；无法识别目标 App 平台或落在 H5/小程序等非一期宿主时，初始化失败并记录 `unsupported_platform`。`platformVersion` 正常时只取系统真实版本号、去掉首尾空白但不改写格式；读取失败、空白或异常时写 `UNKNOWN` 并记录 `platform_version_unavailable`，继续采集且不提供业务覆盖入口。`domain` 优先读取 `uni.getAppBaseInfo()` 的 iOS `bundleId`、Android `packageName` 或 HarmonyOS `bundleName` / `packageName`，其次读取真实宿主包字段 `hostPackageName`；Android / iOS 字段缺失时通过 Native.js 读取实际安装包标识。不提供业务覆盖入口，也不使用 DCloud appid 代替包标识；均不可用时省略该字段。屏幕尺寸优先由 `uni.getDeviceInfo()` 读取，失败再使用 `uni.getSystemInfoSync()` 的设备 `screenWidth/screenHeight`，绝不用随页面变化的 window 尺寸；两个值均须为正整数，统一写为 `screenWidth=min(rawWidth, rawHeight)`、`screenHeight=max(rawWidth, rawHeight)`，因此横竖屏不会把同一设备拆成两种尺寸。两级读取后仍无有效值时宽高均写 `0` 并记录 `screen_size_unavailable`，不阻塞初始化。`deviceType` 只允许 `PHONE`、`PAD`、`FOLD`、`UNKNOWN`：iOS `iPhone` / `iPad` 映射为前两者，Android 保留同名类型，HarmonyOS 使用其设备类型映射；取不到或不能可靠映射时写 `UNKNOWN` 并记录 `device_type_unknown`，不阻塞采集。`deviceBrand`、`deviceModel` 不作跨端改名，正常时保留系统原值；空、异常或不可用时均写 `UNKNOWN`，分别记录 `device_brand_unavailable`、`device_model_unavailable`，不阻塞采集。`appName` 只取同一 API 的 `appName`，不可覆盖；读取失败统一写空字符串并记录 `app_name_unavailable`，与独立 Android/iOS SDK 的 best-effort 行为对齐。`language` 优先读取标准 App 信息中的 `appLanguage`，其次 `language`；App 统一转换为 BCP 47（`_` 转 `-`，语言小写、script 首字母大写、region 大写），只读到 `zh` 则保留 `zh`，不擅自补成 `zh-Hans` 或 `zh-CN`；取不到或无法解析时写 `und` 并记录 `language_unavailable`。每条新事件通过 `TimezonePort` 读取标准 `Date.getTimezoneOffset()` 并转为字符串，采用“本地时间转 UTC 所需增加分钟数”的统一口径（中国 `-480`）；系统时区或夏令时变化只影响后续事件。读取抛错、非有限数或无法转为整数时写 `0` 并记录 `timezone_offset_unavailable`，不阻塞采集。`appVersion` 优先读取 `uni.getAppBaseInfo().appVersion` 等标准 App 信息；读取失败才使用 `ResolvedGioConfig.appVersionFallback` 的非空值；两者都不可用时写空字符串并记录 `app_version_unavailable`，继续采集，不能伪造 `1.0.0`。网络查询使用固定短 deadline；将宿主返回的 `wifi`、`2g`、`3g`、`4g`、`5g` 规范为 `WIFI`、`2G`、`3G`、`4G`、`5G`，`none`、`unknown`、泛化 `cellular`、超时、错误或宿主不可用都写 `UNKNOWN` 并记录诊断，绝不猜测代际。初始化完成首读后订阅网络状态变化，二者只更新后续事件的 snapshot；连接状态与协议 networkState 分开保存：明确断网为 false，明确联网为 true，无法判断为 null；UNKNOWN 不等于断网。明确断网时事件照常入队和持久化，普通发送、到期重试及后台强制发送均暂停；恢复网络后继续发送，包括宿主报告已连接但无法区分代际的情况。飞行中的请求因明确断网而失败时保留原事件及重试额度；查询失败或迟到的旧读数不能解除新的断网状态。事件 builder 完成字段白名单和系统兜底后，统一调用 `sanitizeOutboundEvent`：它在入队、持久化和发送前移除 `null`、`undefined`、空字符串、空对象和空数组，保留数值 `0`；因此 `domain`、`appName`、无 fallback 的 `appVersion` 等读取失败时不会伪造值，也不会把空字段发给 collector。`attributes` 已经被属性 normalizer 转为字符串 map，其中 `"false"` 不是空值。首个 `VISIT`、首个 `PAGE` 和 buffer 中任何手动/无埋点事件都使用同一份就绪后的稳定 context snapshot 与各自构建时的 timezone；后续网络或时区变化只更新未来事件，不回写已入队事件。`appState` 是生命周期驱动的未来事件快照，不能永久沿用启动时的值。
 
 `appChannel` 由 App event builder 从 `ResolvedGioConfig.appChannel` 直接读取，三端规则完全相同：非空即进入后续事件，`null` 则交给 `sanitizeOutboundEvent` 省略。显式值仅保存于当前成功 init 的内存配置，不写 storage、不支持运行时修改；不得读取 `uni.getAppBaseInfo().channel` 或加入任何端侧自动回退。
 
@@ -806,6 +806,7 @@ App 适配器的 `persistentQueue=true`，同一队列的读改写由 core 串�
 
 - 未传 `dataCollect` 时立即采集；这是与既有 SDK 对齐的默认行为；
 - 需要等待隐私同意的业务必须 `init({ dataCollect: false })`；禁止采集时可初始化身份和必要配置，但不得产生、持久化或上传行为事件；
+- 后台因换人或恢复采集而新建 session 时，保留 App 离开时间，下一次前台恢复仍按该时间判断会话超时。
 - 从关闭重新开启时新建 session，并立即补当前入口 `VISIT` 与当前页 `PAGE`；关闭期间的事件不补发。该顺序与 Android、iOS 和小程序 SDK 的恢复采集行为对齐；
 - 从 `true` 切到 `false` 时，立即阻止后续自动/手动事件构建；不删除既有待发队列，不清 identity/session/eventSequenceId，也不取消已排程或进行中的上传。关闭期间新发生的事件不会补发；再次同意后从新 session 开始。事件计时器不属于一期，因此一期没有 timer registry 可清理；二期加入计时器时再按独立 SDK 的“关闭即清计时器”语义实现。
 - `debug` 默认关闭且只能在 `init()` 配置；开启后按小程序 SDK 的调试口径打印已完成字段清理、移除 SDK 内部 `requestId` 等元数据后的待发事件数组。它是本地开发排障输出，不持久化、不上报，也不得在生产环境开启；敏感 input 的事件仍须在事件构建阶段被拒绝，不能因 debug 绕过隐私规则。
@@ -857,7 +858,7 @@ Web 和小程序适配器是后续能力，不进入 1.0 发布物；其接口�
 - core 将基础 `serverUrl` 拼为 `POST {serverUrl}/v3/projects/{accountId}/collect?stm={sendAt}&compress=0`，其中 `sendAt` 是批次实际开始发送时的 Unix 毫秒；请求头固定为 `Content-Type: application/json`、`Accept: application/json`，Body 为已清理的 JSON 事件数组。适配器不得改写 URL、事件、压缩标记或认证字段；
 - 成功状态码以 Protocol/collector 契约为准；一期 collector 明确接受 `200` 和 `204`，其他状态码转换为 `http`；
 - 仅 `network`、`timeout` 和 5xx `http` 进入有限退避重试；4xx、编码错误和 `unsupported` 不重试并记录 drop reason；
-- App 三端将重试中的队列持久化，冷启动后继续发送；Web 和小程序只在当前运行期的内存队列中重试，刷新、退出或宿主回收后不恢复；
+- App 三端将重试中的队列及已使用的 retryCount 持久化，冷启动按剩余额度继续发送，不归零；剩余额度不同的事件分批发送，超过额度的历史项直接丢弃；Web 和小程序只在当前运行期的内存队列中重试，刷新、退出或宿主回收后不恢复；
 - App `onHide` 只触发最长 1 秒的 force flush；到期未完成的事件保持在 App 持久化队列中，留待下次启动发送，不采用另一种“后台专用”报文。Web 二期没有 `APP_CLOSED`，不得为了发送而伪造关闭事件或把 sendBeacon 混入核心链路；
 - HTTP `200`/`204` 只表示 collector 已接收；服务端入库拒绝必须由可关联的响应/诊断协议另行证明。
 
@@ -1113,13 +1114,13 @@ type Capability = {
 
 ### 17.1 发布产物
 
-- SDK 作为 `uni_modules/gio-uniapp-autotracker` 发布；
+- SDK 同时作为无作用域 npm 包 `gio-uniapp-autotracker` 与 `uni_modules/gio-uniapp-autotracker` 发布；
 - 运行时 SDK 与 Vite 插件可以分 entry，但必须版本同步；
-- release 包只包含 SDK 源码、构建入口、类型、文档与示例；二期原生增强发布时再增加必要 UTS 目录；
+- release 包只包含编译后的 ESM JS、类型、Vite 入口、文档与许可证；二期原生增强发布时再增加必要 UTS 目录；
 - demo、测试记录、内部 collector 配置和秘钥不可进入发布包；
 - package metadata 声明支持传统 uni-app + Vue3 + App 三端，不借用 uni-app x 的版本承诺。
 
-当前仓库以 `pnpm run release:prepare` 生成 `release/uni_modules/gio-uniapp-autotracker`，并由 `pnpm run release:check` 验证目录白名单、入口 metadata、Vite 编译依赖及发布包的源码类型检查；该检查是静态发布物检查，不能替代干净 demo 重装或三端编译。
+当前仓库以 `pnpm run release:prepare` 生成 `dist/uni_modules/gio-uniapp-autotracker`，并由 `pnpm run release:check` 验证递归白名单、版本/哈希、双渠道公共代码、Vite 依赖隔离，并在仓库外安装最终压缩包执行入口/类型/探针验证；仍不能替代三端设备请求和收数验收。双渠道发布流程见 [安装与发布](./release.md)。
 
 ### 17.2 向后兼容
 
