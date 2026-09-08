@@ -5,9 +5,9 @@
       <text class="hint">SDK 在 main.ts 初始化时安装全局 lifecycle mixin，自动转发 onLaunch/onShow/onHide 与页面 onLoad/onShow/onHide/onUnload。切换页面可验证 PAGE，应用退后台可验证 APP_CLOSED。</text>
     </view>
     <view class="section">
-      <button data-title="发送生命周期示例事件" @click="trackAction">发送 lifecycle_demo_action</button>
-      <button class="secondary" data-title="前往路由演示页" @click="goRoute">带参前往路由页</button>
-      <button class="secondary" data-title="初始化后重复注册插件" @click="registerAfterInit">验证初始化后重复注册插件</button>
+      <button data-title="发送生命周期示例事件" @click="trackAction($event)">发送 lifecycle_demo_action</button>
+      <button class="secondary" data-title="前往路由演示页" @click="goRoute($event)">带参前往路由页</button>
+      <button class="secondary" data-title="初始化后重复注册插件" @click="registerAfterInit($event)">验证初始化后重复注册插件</button>
       <text class="result">{{ result }}</text>
     </view>
     <view class="section"><text class="hint">APP_CLOSED 只能在真实 App 切到后台时触发；浏览器或静态检查不能替代这项验证。</text></view>

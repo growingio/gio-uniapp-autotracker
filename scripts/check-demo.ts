@@ -84,7 +84,7 @@ if (!viteConfig.includes('__GIO_AUTOTRACK_VERIFICATION__: true')) throw new Erro
 
 const autoTrackPage = readFileSync(resolve(root, 'demo/pages/autotrack/autotrack.vue'), 'utf8')
 const transformed = transformAutoTrackSfc(autoTrackPage, '@/uni_modules/gio-uniapp-autotracker/autotrack.js')
-if (!transformed.changed || transformed.warnings.length > 0 || !transformed.code.includes('dispatchAutoTrack as gioAutoTrack') || !transformed.code.includes('ignored:&quot;&quot;') || !transformed.code.includes('sensitive:true') || !transformed.code.includes('schemaVersion:2') || !transformed.code.includes('eventName:&quot;openURL&quot;') || transformed.code.includes('xpath:')) {
+if (!transformed.changed || (transformed.warnings.length !== 1 || transformed.warnings[0]?.code !== 'complex_handler') || !transformed.code.includes('dispatchAutoTrack as gioAutoTrack') || !transformed.code.includes('ignored:&quot;&quot;') || !transformed.code.includes('sensitive:true') || !transformed.code.includes('schemaVersion:2') || !transformed.code.includes('eventName:&quot;openURL&quot;') || transformed.code.includes('xpath:')) {
   throw new Error('auto-track showcase must compile to dispatcher calls that preserve ignore and sensitive markers')
 }
 for (const file of [

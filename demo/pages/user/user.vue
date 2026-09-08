@@ -6,16 +6,16 @@
     </view>
     <view class="section">
       <text class="label">用户 ID</text>
-      <input v-model="userId" data-growing-track data-title="用户 ID" placeholder="例如 demo-user-001" @blur="onInputBlur" />
+      <input v-model="userId" data-growing-track data-title="用户 ID" placeholder="例如 demo-user-001" @blur="onInputBlur($event)" />
       <text class="label">用户 Key（可选）</text>
-      <input v-model="userKey" data-growing-track data-title="用户 Key" placeholder="例如 email" @blur="onInputBlur" />
-      <button data-title="设置用户身份" @click="setUser">设置用户身份</button>
-      <button class="secondary" data-title="清除用户身份" @click="clearUser">清除用户身份</button>
-      <button class="secondary" data-title="设置用户属性" @click="setAttributes">设置示例用户属性</button>
-      <button class="secondary" data-title="设置杭州位置" @click="setLocation">设置杭州位置</button>
-      <button class="secondary" data-title="清除位置" @click="clearLocation">清除位置</button>
-      <button class="secondary" data-title="验证非法身份值" @click="invalidUser">验证非字符串 userId</button>
-      <button class="secondary" data-title="验证越界位置" @click="invalidLocation">验证越界位置</button>
+      <input v-model="userKey" data-growing-track data-title="用户 Key" placeholder="例如 email" @blur="onInputBlur($event)" />
+      <button data-title="设置用户身份" @click="setUser($event)">设置用户身份</button>
+      <button class="secondary" data-title="清除用户身份" @click="clearUser($event)">清除用户身份</button>
+      <button class="secondary" data-title="设置用户属性" @click="setAttributes($event)">设置示例用户属性</button>
+      <button class="secondary" data-title="设置杭州位置" @click="setLocation($event)">设置杭州位置</button>
+      <button class="secondary" data-title="清除位置" @click="clearLocation($event)">清除位置</button>
+      <button class="secondary" data-title="验证非法身份值" @click="invalidUser($event)">验证非字符串 userId</button>
+      <button class="secondary" data-title="验证越界位置" @click="invalidLocation($event)">验证越界位置</button>
     </view>
     <view class="section"><text class="result">{{ result }}</text></view>
   </scroll-view>

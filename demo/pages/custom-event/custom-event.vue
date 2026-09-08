@@ -5,10 +5,10 @@
       <text class="hint">事件只有在 dataCollect=true 且 SDK 已就绪时才会进入队列。属性会被 SDK 归一化，非法值不会原样出站。</text>
     </view>
     <view class="section">
-      <button data-title="发送商品曝光事件" @click="trackProduct">发送 product_exposure</button>
-      <button data-title="发送边界属性事件" @click="trackBoundary">发送含边界属性的事件</button>
-      <button class="secondary" data-title="发送非法事件名" @click="trackInvalid">尝试非法事件名</button>
-      <button class="secondary" data-title="调用未知命令" @click="unknownCommand">尝试未知命令</button>
+      <button data-title="发送商品曝光事件" @click="trackProduct($event)">发送 product_exposure</button>
+      <button data-title="发送边界属性事件" @click="trackBoundary($event)">发送含边界属性的事件</button>
+      <button class="secondary" data-title="发送非法事件名" @click="trackInvalid($event)">尝试非法事件名</button>
+      <button class="secondary" data-title="调用未知命令" @click="unknownCommand($event)">尝试未知命令</button>
     </view>
     <view class="section">
       <text class="section-title">结果</text>

@@ -22,8 +22,8 @@
     </view>
     <view class="section">
       <text class="section-title">快捷动作</text>
-      <button data-title="发送首页自定义事件" @click="trackQuick">发送 home_quick_track</button>
-      <button class="secondary" data-title="带参数前往路由页" @click="goRoute">前往路由页（带参数）</button>
+      <button data-title="发送首页自定义事件" @click="trackQuick($event)">发送 home_quick_track</button>
+      <button class="secondary" data-title="带参数前往路由页" @click="goRoute($event)">前往路由页（带参数）</button>
       <text class="hint">{{ note }}</text>
     </view>
   </scroll-view>

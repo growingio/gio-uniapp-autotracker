@@ -1,7 +1,7 @@
 <template>
   <view class="syntax-card">
     <text class="syntax-title">setup() 返回别名</text>
-    <button id="setup-alias-action" data-title="setup alias 按钮" @tap="submit">执行 setup alias handler</button>
+    <button id="setup-alias-action" data-title="setup alias 按钮" @tap="submit($event)">执行 setup alias handler</button>
     <text class="syntax-result">业务执行次数：{{ count }}</text>
     <text class="expected">预期：setup-alias-action#submit，记录模板可见名称 submit</text>
   </view>

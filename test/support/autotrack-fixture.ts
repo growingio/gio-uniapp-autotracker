@@ -15,11 +15,13 @@ export const testAutoTrackProfile: AppCapabilityProfile = {
 type TestNode = { type: string; style: { display: string }; props: Record<string, unknown>; children: TestNode[]; parent: TestNode | null; text?: string }
 function makeNode(type: string): TestNode { return { type, style: { display: '' }, props: {}, children: [], parent: null } }
 
-export function mountAutoTrackSfc(source: string, dispatch: (...args: unknown[]) => unknown, modules: Record<string, unknown> = {}) {
-  const transformed = transformAutoTrackSfc(source, '@sdk/runtime')
+export function mountAutoTrackSfc(source: string, dispatch: (...args: unknown[]) => unknown, modules: Record<string, unknown> = {}, instrument = true) {
+  const transformed = instrument ? transformAutoTrackSfc(source, '@sdk/runtime') : { code: source, warnings: [], changed: false }
   const { descriptor } = parse(transformed.code)
   const script = compileScript(descriptor, { id: 'gio-test', genDefaultAs: '__Component' })
-  const template = compileTemplate({ source: descriptor.template?.content ?? '', filename: 'fixture.vue', id: 'gio-test', compilerOptions: { bindingMetadata: script.bindings, isCustomElement: (tag) => (TEMPLATE_ELEMENTS as readonly string[]).includes(tag) } })
+  const isTS = (descriptor.scriptSetup?.lang ?? descriptor.script?.lang) === 'ts'
+  // 与 Vite Vue 插件一致，TypeScript 模板必须显式配置表达式解析插件。
+  const template = compileTemplate({ source: descriptor.template?.content ?? '', filename: 'fixture.vue', id: 'gio-test', compilerOptions: { isTS, expressionPlugins: isTS ? ['typescript'] : [], bindingMetadata: script.bindings, isCustomElement: (tag) => (TEMPLATE_ELEMENTS as readonly string[]).includes(tag) } })
   if (template.errors.length > 0) throw new Error(String(template.errors[0]))
   const javascript = ts.transpileModule(`${script.content}\n${template.code}\n__Component.render=render;\nexport default __Component`, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
@@ -53,10 +55,10 @@ export function mountAutoTrackSfc(source: string, dispatch: (...args: unknown[])
     visit(root)
     return nodes
   }
-  function fire(at: number, name: string, event: unknown): unknown {
+  function fire(at: number, name: string, ...events: unknown[]): unknown {
     const handler = elements().filter((element) => typeof element.props[name] === 'function')[at]?.props[name]
     if (typeof handler !== 'function') throw new Error(`fixture_handler_missing:${name}:${at}`)
-    return handler(event)
+    return handler(...events)
   }
   return { transformed, instance, elements, fire, unmount: () => app.unmount() }
 }

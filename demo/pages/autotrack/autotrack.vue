@@ -21,10 +21,10 @@
       <text class="expected">预期：tap-card#onAction，index=2</text>
 
       <text class="case-title">currentTarget 无 id，target 有 id</text>
-      <view class="tap-card" data-title="父节点无 id" @tap="onParentWithoutId"><text id="child-only-id">点击这个有 id 的子节点</text></view>
+      <view class="tap-card" data-title="父节点无 id" @tap="onParentWithoutId($event)"><text id="child-only-id">点击这个有 id 的子节点</text></view>
       <text class="expected">预期：#onParentWithoutId，不能借用 child-only-id</text>
 
-      <button id="zero-index" data-index="0" @tap="onZeroIndex">data-index=0</button>
+      <button id="zero-index" data-index="0" @tap="onZeroIndex($event)">data-index=0</button>
       <text class="expected">预期：zero-index#onZeroIndex，事件中没有 index</text>
     </view>
 
@@ -38,22 +38,22 @@
       <button v-for="item in noIdItems" :key="item" :data-title="item" @tap="onNoIdListAction(item)">无 id：{{ item }}</button>
       <text class="expected">预期：两项均为 #onNoIdListAction，不生成结构路径</text>
 
-      <view class="toggle-row"><text>v-if 用例</text><switch :checked="showIf" data-growing-ignore @change="onToggleIf" /></view>
-      <button v-if="showIf" id="conditional-if" @tap="onConditionalIf">v-if 当前可见</button>
+      <view class="toggle-row"><text>v-if 用例</text><switch :checked="showIf" data-growing-ignore @change="onToggleIf($event)" /></view>
+      <button v-if="showIf" id="conditional-if" @tap="onConditionalIf($event)">v-if 当前可见</button>
       <text class="expected">预期：只有按钮实际存在并被点击时产生 conditional-if#onConditionalIf</text>
 
-      <view class="toggle-row"><text>v-show 用例</text><switch :checked="showVShow" data-growing-ignore @change="onToggleVShow" /></view>
-      <button v-show="showVShow" id="conditional-show" @tap="onConditionalShow">v-show 当前可见</button>
+      <view class="toggle-row"><text>v-show 用例</text><switch :checked="showVShow" data-growing-ignore @change="onToggleVShow($event)" /></view>
+      <button v-show="showVShow" id="conditional-show" @tap="onConditionalShow($event)">v-show 当前可见</button>
       <text class="expected">预期：只有可达并被点击时产生 conditional-show#onConditionalShow</text>
 
       <button @tap="enabled ? onAction('条件分支：开') : onInputComplete">无 id 的条件 handler</button>
-      <text class="expected">预期：开关开启为 #onAction，关闭为 #onInputComplete</text>
+      <text class="expected">预期：包含函数引用的分支保持原行为，整个表达式跳过自动采集；关闭时不会调用 onInputComplete。</text>
     </view>
 
     <view class="section">
       <text class="section-title">3. 三种 Vue 写法</text>
       <text class="hint">三个按钮的业务计数每次只能增加 1，用来确认插桩没有重复调用原 handler。</text>
-      <button id="options-action" @tap="onOptionsAction">Options API methods</button>
+      <button id="options-action" @tap="onOptionsAction($event)">Options API methods</button>
       <text class="expected">预期：options-action#onOptionsAction</text>
       <auto-track-script-setup />
       <auto-track-setup-alias />
@@ -62,65 +62,65 @@
     <view class="section">
       <text class="section-title">4. input / textarea 与隐私</text>
       <text class="case-title">显式采集输入值</text>
-      <input id="nickname" v-model="nickname" data-growing-track data-title="昵称" placeholder="输入昵称后失焦" @blur="onInputComplete" />
+      <input id="nickname" v-model="nickname" data-growing-track data-title="昵称" placeholder="输入昵称后失焦" @blur="onInputComplete($event)" />
       <text class="expected">预期：nickname#onInputComplete，textValue 为输入内容</text>
 
       <text class="case-title">未放行输入值</text>
-      <input id="untracked-input" v-model="untrackedText" placeholder="输入后失焦" @blur="onInputComplete" />
+      <input id="untracked-input" v-model="untrackedText" placeholder="输入后失焦" @blur="onInputComplete($event)" />
       <text class="expected">预期：仍有 VIEW_CHANGE，但没有 textValue</text>
 
       <text class="case-title">密码和显式敏感输入</text>
-      <input id="password" v-model="password" type="password" data-growing-track placeholder="密码不会生成自动事件" @blur="onInputComplete" />
-      <input id="sensitive-input" v-model="sensitiveText" data-growing-sensitive data-growing-track placeholder="敏感标记不会生成自动事件" @blur="onInputComplete" />
+      <input id="password" v-model="password" type="password" data-growing-track placeholder="密码不会生成自动事件" @blur="onInputComplete($event)" />
+      <input id="sensitive-input" v-model="sensitiveText" data-growing-sensitive data-growing-track placeholder="敏感标记不会生成自动事件" @blur="onInputComplete($event)" />
       <text class="expected">预期：两个业务 handler 都执行，但没有 VIEW_CHANGE，日志不出现输入原文</text>
 
       <text class="case-title">textarea 同时声明 blur / confirm</text>
-      <textarea id="note" v-model="note" data-growing-track placeholder="输入备注后完成" @blur="onInputComplete" @confirm="onInputComplete" />
+      <textarea id="note" v-model="note" data-growing-track placeholder="输入备注后完成" @blur="onInputComplete($event)" @confirm="onInputComplete($event)" />
       <text class="expected">预期：只选择 blur 插桩，业务事件仍按原声明执行</text>
     </view>
 
     <view class="section">
       <text class="section-title">5. 所有 change 组件</text>
-      <view class="toggle-row"><text>订阅开关（含 false）</text><switch id="subscription" :checked="enabled" data-growing-track data-title="订阅开关" @change="onSwitchChange" /></view>
+      <view class="toggle-row"><text>订阅开关（含 false）</text><switch id="subscription" :checked="enabled" data-growing-track data-title="订阅开关" @change="onSwitchChange($event)" /></view>
       <text class="expected">预期：subscription#onSwitchChange，textValue 保留 true/false</text>
 
       <text class="case-title">slider（请拖回 0）</text>
-      <slider id="volume" :value="volume" data-growing-track @change="onVolumeChange" />
+      <slider id="volume" :value="volume" data-growing-track @change="onVolumeChange($event)" />
       <text class="expected">预期：volume#onVolumeChange，textValue 保留 0</text>
 
       <text class="case-title">radio-group</text>
-      <radio-group id="choice" data-growing-track @change="onChoiceChange"><label class="choice"><radio value="A" />A</label><label class="choice"><radio value="B" />B</label></radio-group>
+      <radio-group id="choice" data-growing-track @change="onChoiceChange($event)"><label class="choice"><radio value="A" />A</label><label class="choice"><radio value="B" />B</label></radio-group>
       <text class="expected">预期：choice#onChoiceChange，textValue 为 A 或 B</text>
 
       <text class="case-title">checkbox-group</text>
-      <checkbox-group id="tags" data-growing-track @change="onTagsChange"><label class="choice"><checkbox value="A" />A</label><label class="choice"><checkbox value="B" />B</label></checkbox-group>
+      <checkbox-group id="tags" data-growing-track @change="onTagsChange($event)"><label class="choice"><checkbox value="A" />A</label><label class="choice"><checkbox value="B" />B</label></checkbox-group>
       <text class="expected">预期：tags#onTagsChange，多值以 || 拼接</text>
 
       <text class="case-title">picker 对象 range</text>
-      <picker id="city" :range="cities" range-key="name" :value="city" data-growing-track @change="onCityChange"><view class="tap-card">当前城市：{{ cities[city].name }}</view></picker>
-      <text class="expected">预期：city#onCityChange，优先输出城市名称</text>
+      <picker id="city" :range="cities" range-key="name" :value="city" data-growing-track @change="onCityChange($event)"><view class="tap-card">当前城市：{{ cities[city].name }}</view></picker>
+      <text class="expected">预期：city#onCityChange，动态 range 使用所选下标</text>
 
       <text class="case-title">picker-view 两列</text>
-      <picker-view id="columns" class="picker-columns" :value="columns" data-growing-track @change="onColumnsChange">
+      <picker-view id="columns" class="picker-columns" :value="columns" data-growing-track @change="onColumnsChange($event)">
         <picker-view-column><view v-for="item in regions" :key="item">{{ item }}</view></picker-view-column>
         <picker-view-column><view v-for="item in periods" :key="item">{{ item }}</view></picker-view-column>
       </picker-view>
-      <text class="expected">预期：columns#onColumnsChange，显示值以 || 拼接</text>
+      <text class="expected">预期：columns#onColumnsChange，各列所选下标以 || 拼接</text>
 
       <text class="case-title">swiper 手动与 autoplay</text>
-      <swiper id="banner" class="banner" data-title="轮播文案" :autoplay="autoplay" @change="onSwiperChange"><swiper-item><view class="banner-item">第一张</view></swiper-item><swiper-item><view class="banner-item">第二张</view></swiper-item></swiper>
-      <button @tap="onToggleAutoplay">自动轮播：{{ autoplay ? '开启' : '关闭' }}</button>
+      <swiper id="banner" class="banner" data-title="轮播文案" :autoplay="autoplay" @change="onSwiperChange($event)"><swiper-item><view class="banner-item">第一张</view></swiper-item><swiper-item><view class="banner-item">第二张</view></swiper-item></swiper>
+      <button @tap="onToggleAutoplay($event)">自动轮播：{{ autoplay ? '开启' : '关闭' }}</button>
       <text class="expected">预期：手动滑动生成 banner#onSwiperChange；未放行的 autoplay 不生成事件</text>
     </view>
 
     <view class="section">
       <text class="section-title">6. ignore、uni-link 与 tabBar</text>
-      <button data-growing-ignore data-title="必须忽略的按钮" @click="onIgnoredAction">忽略采集，保留业务 handler</button>
-      <view id="target-ignore" class="tap-card" @tap="onIgnoredChildAction"><text data-growing-ignore>点击带 ignore 的子节点</text></view>
+      <button data-growing-ignore data-title="必须忽略的按钮" @click="onIgnoredAction($event)">忽略采集，保留业务 handler</button>
+      <view id="target-ignore" class="tap-card" @tap="onIgnoredChildAction($event)"><text data-growing-ignore>点击带 ignore 的子节点</text></view>
       <text class="expected">预期：两项业务计数增加，但都没有 VIEW_CLICK</text>
 
-      <uni-link :href="linkHref" data-title="uni-link 动态链接">打开路由页验证 uni-link</uni-link>
-      <text class="expected">预期：#openURL，hyperlink 为动态 href；内部与外层监听最终只发送一次</text>
+      <uni-link :href="linkHref" :data-src="linkHref" data-title="uni-link 动态链接">打开路由页验证 uni-link</uni-link>
+      <text class="expected">预期：#openURL，hyperlink 从原生 dataset.src 获取；内部与外层监听最终只发送一次</text>
 
       <text class="hint">点击底部任意标签验证 tabBar：xpath 固定为 #onTabItemTap，index 从 1 开始，hyperlink 为 pagePath。</text>
     </view>

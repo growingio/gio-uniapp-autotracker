@@ -1,7 +1,7 @@
 <template>
   <view class="syntax-card">
     <text class="syntax-title">&lt;script setup&gt;</text>
-    <button id="script-setup-action" data-title="script setup 按钮" @tap="submit">执行 script setup handler</button>
+    <button id="script-setup-action" data-title="script setup 按钮" @tap="submit($event)">执行 script setup handler</button>
     <text class="syntax-result">业务执行次数：{{ count }}</text>
     <text class="expected">预期：script-setup-action#submit，每次点击只增加 1</text>
   </view>

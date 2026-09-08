@@ -69,17 +69,17 @@ describe('SFC to mock collector pipeline', () => {
       const items = [{ id:'sku-1', title:'one' }, { id:'sku-2', title:'two' }]; const link = '/docs';
       </script><template><view>
       <template v-for="(item, i) in items" :key="item.id"><button :id="item.id" :data-title="item.title" :data-index="i + 1" @tap="business($event)"/></template>
-      <button @click="business"/><input data-growing-track @blur="business"/><input type="password" data-growing-track @blur="business"/>
-      <picker :range="options" range-key="label" data-growing-track @change="business"/>
-      <picker-view data-growing-track @change="business"><picker-view-column><view v-for="city in cities">{{city}}</view></picker-view-column></picker-view>
-      <switch data-growing-track @change="business"/><swiper data-title="banner" @change="business"/>
+      <button @click="business($event)"/><input data-growing-track @blur="business($event)"/><input type="password" data-growing-track @blur="business($event)"/>
+      <picker :range="options" range-key="label" data-growing-track @change="business($event)"/>
+      <picker-view data-growing-track @change="business($event)"><picker-view-column><view v-for="city in cities">{{city}}</view></picker-view-column></picker-view>
+      <switch data-growing-track @change="business($event)"/><swiper data-title="banner" @change="business($event)"/>
       <uni-link :href="link"/>
       </view></template>`, (probe, event) => dispatchAutoTrack(probe as AutoTrackCall, event), { fixture: { business } })
     try {
       const first = { type: 'tap', timeStamp: 100, currentTarget: { id: 'sku-1', dataset: { title: 'live one', index: '1' } } }
       expect(fixture.fire(0, 'onTap', first)).toBe(first)
       fixture.fire(0, 'onTap', first)
-      fixture.fire(1, 'onTap', { type: 'tap', timeStamp: 101, currentTarget: { id: 'sku-2' } })
+      fixture.fire(1, 'onTap', { type: 'tap', timeStamp: 101, currentTarget: { id: 'sku-2', dataset: { title: 'two', index: '2' } } })
       fixture.fire(0, 'onClick', { currentTarget: {}, target: { id: 'child' } })
       fixture.fire(0, 'onBlur', { currentTarget: { id: 'input' }, detail: { value: 0 } })
       fixture.fire(1, 'onBlur', { detail: { value: 'must-not-leak' } })
@@ -88,7 +88,7 @@ describe('SFC to mock collector pipeline', () => {
       fixture.fire(2, 'onChange', { currentTarget: { id: 'switch' }, detail: { value: false } })
       fixture.fire(3, 'onChange', { currentTarget: { id: 'banner' }, detail: { current: 0, source: 'touch' } })
       fixture.fire(3, 'onChange', { currentTarget: { id: 'banner' }, detail: { current: 1, source: 'autoplay' } })
-      fixture.fire(1, 'onClick', {})
+      fixture.fire(1, 'onClick', { currentTarget: { dataset: { src: '/docs' } } })
       createPageLifecycleBridge(tracker, 'home#1').onTabItemTap({ index: 0, text: 'Home', pagePath: 'pages/home/index' })
       await expect.poll(() => received.filter((event) => event.eventType === 'VIEW_CLICK' || event.eventType === 'VIEW_CHANGE').length).toBe(10)
       const views = received.filter((event) => event.eventType === 'VIEW_CLICK' || event.eventType === 'VIEW_CHANGE')
@@ -97,8 +97,8 @@ describe('SFC to mock collector pipeline', () => {
         expect.objectContaining({ xpath: 'sku-2#business', textValue: 'two', index: 2 }),
         expect.objectContaining({ xpath: '#business' }),
         expect.objectContaining({ xpath: 'input#business', textValue: '0' }),
-        expect.objectContaining({ xpath: 'picker#business', textValue: 'second' }),
-        expect.objectContaining({ xpath: 'cities#business', textValue: '杭州' }),
+        expect.objectContaining({ xpath: 'picker#business', textValue: '1' }),
+        expect.objectContaining({ xpath: 'cities#business', textValue: '0' }),
         expect.objectContaining({ xpath: 'switch#business', textValue: 'false' }),
         expect.objectContaining({ xpath: 'banner#business', textValue: 'banner' }),
         expect.objectContaining({ xpath: '#openURL', hyperlink: '/docs' }),

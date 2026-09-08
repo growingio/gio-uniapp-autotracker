@@ -3,8 +3,8 @@
     <view class="section"><text class="title">路由 / query / referralPage</text><text class="hint">当前页面的 query 会由 Page bridge 序列化；上一个 PAGE 会成为 referralPage。请在请求体中一起核对。</text></view>
     <view class="section"><text class="section-title">当前 query</text><text class="result">{{ queryText }}</text></view>
     <view class="section">
-      <button data-title="刷新路由参数" @click="openNext">继续跳转（新 query）</button>
-      <button class="secondary" data-title="返回首页" @click="backHome">返回首页</button>
+      <button data-title="刷新路由参数" @click="openNext($event)">继续跳转（新 query）</button>
+      <button class="secondary" data-title="返回首页" @click="backHome($event)">返回首页</button>
     </view>
   </scroll-view>
 </template>

@@ -86,7 +86,7 @@ describe('demo scenarios', () => {
     expect(transformed.code).toContain("onAction(&#39;普通点击&#39;)")
     expect(transformed.code).toContain('onInputComplete($event)')
     expect(transformed.code).toContain('eventName:&quot;openURL&quot;')
-    expect(transformed.warnings).toStrictEqual([])
+    expect(transformed.warnings).toMatchObject([{ code: 'complex_handler' }])
     for (const marker of ['currentTarget 无 id', 'v-if 用例', 'v-show 用例', 'data-growing-sensitive', '<uni-link']) {
       expect(source).toContain(marker)
     }

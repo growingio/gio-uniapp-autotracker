@@ -48,23 +48,42 @@ function safeLeaf(root: AstNode): boolean {
   return safe
 }
 
-/** metadata 只补充可直接读取的绑定，不重复执行业务调用或赋值表达式。 */
+/** 只复制字面量元数据；动态绑定由原模板求值，事件阶段从原生 dataset 读取。 */
 export function metadataExpression(source: string): string | null {
   const root = expression(source)
-  if (root === null || !safeLeaf(root)) return null
-  let safe = true
-  walk(root, (entry) => {
-    if (['CallExpression', 'AssignmentExpression', 'UpdateExpression', 'ArrowFunctionExpression', 'FunctionExpression', 'ObjectMethod', 'SpreadElement'].includes(entry.type)) safe = false
-  })
-  return safe ? `(${source})` : null
+  const literal = (value: AstNode | null): boolean => {
+    if (value === null) return false
+    if (['StringLiteral', 'NumericLiteral', 'BooleanLiteral', 'NullLiteral'].includes(value.type)) return true
+    if (value.type === 'UnaryExpression' && ['+', '-'].includes(String(value.operator))) return node(value.argument)?.type === 'NumericLiteral'
+    if (value.type === 'ArrayExpression') return Array.isArray(value.elements) && value.elements.every((item) => item === null || literal(node(item)))
+    if (value.type === 'ObjectExpression') return Array.isArray(value.properties) && value.properties.every((item) => {
+      const property = node(item)
+      return property?.type === 'ObjectProperty' && !property.computed && !property.shorthand && literal(node(property.value))
+    })
+    return false
+  }
+  return literal(root) ? `(${source})` : null
 }
 
-type Branch = Readonly<{ name: string; body: (probe: string) => string; fallback: boolean }>
-function branch(root: AstNode, source: string, nativeName: string, listener: string): Branch | null {
+type Branch = Readonly<{ name: string; original: string; fallback: boolean }>
+function unwrapTypeExpression(root: AstNode): AstNode {
+  // Vue 会穿透这些 TypeScript 包装识别函数引用，不能误改成返回函数的事件闭包。
+  const wrappers = ['TSAsExpression', 'TSTypeAssertion', 'TSNonNullExpression', 'TSInstantiationExpression', 'TSSatisfiesExpression']
+  let current = root
+  while (wrappers.includes(current.type)) {
+    const inner = node(current.expression)
+    if (inner === null) break
+    current = inner
+  }
+  return current
+}
+
+function branch(root: AstNode, source: string, nativeName: string, inline = false): Branch | null {
   if (!safeLeaf(root)) return null
   const original = source.slice(root.start ?? 0, root.end ?? source.length)
-  const reference = memberPath(root)
-  if (reference !== null) return { name: reference, fallback: false, body: (probe) => `${probe};return ${original}($event)` }
+  const reference = memberPath(unwrapTypeExpression(root))
+  // 函数引用由 Vue 决定求值、缓存、空值及多 handler 行为，不能擅自替换成调用。
+  if (reference !== null) return null
   const calls: AstNode[] = []
   const functions: AstNode[] = []
   walk(root, (entry) => {
@@ -74,35 +93,49 @@ function branch(root: AstNode, source: string, nativeName: string, listener: str
   if (calls.length > 1 || calls.some((call) => memberPath(call.callee) === null)) return null
   const name = calls.length === 1 ? memberPath(calls[0]?.callee) as string : nativeName
   if (root.type === 'ArrowFunctionExpression' || root.type === 'FunctionExpression') {
+    if (inline) return null
     if (functions.length !== 1 || root.async || root.generator) return null
     const body = node(root.body)
     if (body?.type === 'BlockStatement') {
+      if (Array.isArray(body.directives) && body.directives.length > 0) return null
       const statements = Array.isArray(body.body) ? body.body : []
       if (statements.length > 1 || statements.some((statement) => !['ReturnStatement', 'ExpressionStatement'].includes(node(statement)?.type ?? ''))) return null
     }
-    return { name, fallback: calls.length === 0, body: (probe) => `const ${listener}=(${original});${probe};return ${listener}($event)` }
+    return { name, original, fallback: calls.length === 0 }
   }
   if (functions.length > 0 || (root.type !== 'CallExpression' && calls.length > 0)) return null
-  return { name, fallback: calls.length === 0, body: (probe) => `${probe};return (${original})` }
+  return { name, original, fallback: calls.length === 0 }
 }
 
-export function rewriteHandler(source: string, nativeName: string, dispatcher: string, probe: (name: string) => string): Readonly<{ code: string; fallback: boolean }> | null {
+export function rewriteHandler(source: string, nativeName: string, _dispatcher: string, probe: (name: string, event?: string) => string): Readonly<{ code: string; fallback: boolean }> | null {
   const root = expression(source)
   if (root === null) return null
-  const listener = `${dispatcher}Listener`
+  if (root.type === 'ArrowFunctionExpression' || root.type === 'FunctionExpression') {
+    const checked = branch(root, source, nativeName)
+    const body = node(root.body)
+    const parameter = Array.isArray(root.params) ? node(root.params[0]) : null
+    if (checked === null || body?.start == null || body.end == null || parameter?.type !== 'Identifier') return null
+    const capture = probe(checked.name, String(parameter.name))
+    // 保留原函数的参数、this、arguments、求值位置和返回行为，只插入失败隔离的探针。
+    const start = body.start + (body.type === 'BlockStatement' ? 1 : 0)
+    const code = body.type === 'BlockStatement'
+      ? `${source.slice(0, start)}${capture}${source.slice(start)}`
+      : `${source.slice(0, start)}{${capture}return (${source.slice(start, body.end)})}${source.slice(body.end)}`
+    return { code, fallback: checked.fallback }
+  }
   if (root.type === 'ConditionalExpression') {
     const test = node(root.test)
     const yes = node(root.consequent)
     const no = node(root.alternate)
     if (test === null || yes === null || no === null || !safeLeaf(test)) return null
-    const left = branch(yes, source, nativeName, listener)
-    const right = branch(no, source, nativeName, listener)
+    const left = branch(yes, source, nativeName, true)
+    const right = branch(no, source, nativeName, true)
     if (left === null || right === null) return null
     return {
-      code: `($event)=>{if(${source.slice(test.start ?? 0, test.end ?? 0)}){${left.body(probe(left.name))}}else{${right.body(probe(right.name))}}}`,
+      code: `($event)=>{if(${source.slice(test.start ?? 0, test.end ?? 0)}){${probe(left.name)};return (${left.original})}else{${probe(right.name)};return (${right.original})}}`,
       fallback: left.fallback || right.fallback,
     }
   }
-  const result = branch(root, source, nativeName, listener)
-  return result === null ? null : { code: `($event)=>{${result.body(probe(result.name))}}`, fallback: result.fallback }
+  const result = branch(root, source, nativeName)
+  return result === null ? null : { code: `($event)=>{${probe(result.name)};return (${result.original})}`, fallback: result.fallback }
 }

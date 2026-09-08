@@ -1,5 +1,5 @@
 <template>
-  <navigator class="link" :url="href" :data-title="label" :data-src="href" @click="openURL"><slot /></navigator>
+  <navigator class="link" :url="href" :data-title="label" :data-src="href" @click="openURL($event)"><slot /></navigator>
 </template>
 
 <script>

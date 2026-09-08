@@ -2,10 +2,10 @@ import { NodeTypes, parse, type ElementNode, type TemplateChildNode } from '@vue
 import { parse as parseSfc } from '@vue/compiler-sfc'
 import { parse as parseScript } from '@babel/parser'
 import { CHANGE_ELEMENTS, TEMPLATE_ELEMENTS } from './contract.js'
-import { containsProbe, expression, metadataExpression, node, rewriteHandler, walk } from './vite-handler.js'
+import { containsProbe, expression, metadataExpression, node, rewriteHandler } from './vite-handler.js'
 
 export type AutoTrackTransformWarning = Readonly<{
-  code: 'sfc_parse_error' | 'template_parse_error' | 'dynamic_event' | 'missing_handler' | 'event_modifiers' | 'custom_component' | 'unsupported_event' | 'complex_handler' | 'event_name_fallback' | '.nvue_not_instrumented'
+  code: 'sfc_parse_error' | 'template_parse_error' | 'dynamic_event' | 'missing_handler' | 'event_modifiers' | 'custom_component' | 'unsupported_event' | 'complex_handler' | 'complex_component_options' | 'event_name_fallback' | '.nvue_not_instrumented'
   offset: number
 }>
 export type AutoTrackTemplateTransform = Readonly<{ code: string; warnings: readonly AutoTrackTransformWarning[]; changed: boolean }>
@@ -137,7 +137,7 @@ function visit(nodes: readonly TemplateChildNode[], dispatcher: string, replacem
       if (!click && (!inputEvents.includes(nativeName) || !(CHANGE_ELEMENTS as readonly string[]).includes(element.tag)
         || (nativeName !== 'change' && element.tag !== 'input' && element.tag !== 'textarea'))) { warn('unsupported_event'); continue }
       if (!click && (element.tag === 'input' || element.tag === 'textarea') && nativeName !== selected) continue
-      const rewritten = rewriteHandler(prop.exp.content, nativeName, dispatcher, (name) => `${dispatcher}(${probeFields(element, click ? 'click' : 'change', name)},$event)`)
+      const rewritten = rewriteHandler(prop.exp.content, nativeName, dispatcher, (name, event = '$event') => `try{${dispatcher}(${probeFields(element, click ? 'click' : 'change', name)},${event})}catch{}`)
       if (rewritten === null) { warn('complex_handler'); continue }
       if (rewritten.fallback) warn('event_name_fallback')
       const before = element.loc.source[prop.exp.loc.start.offset - element.loc.start.offset - 1]
@@ -146,7 +146,7 @@ function visit(nodes: readonly TemplateChildNode[], dispatcher: string, replacem
     }
     if (element.tag === 'uni-link' && !hasClick && !hasDynamic) {
       const end = openingEnd(element)
-      if (end !== null) replacements.push({ start: end, end, value: ` @click="${attribute(`${dispatcher}(${probeFields(element, 'click', 'openURL')},$event)`)}"` })
+      if (end !== null) replacements.push({ start: end, end, value: ` @click="${attribute(`($event)=>{try{${dispatcher}(${probeFields(element, 'click', 'openURL')},$event)}catch{}}`)}"` })
     }
     visit(element.children, dispatcher, replacements, warnings)
   }
@@ -170,16 +170,24 @@ export function transformAutoTrackSfc(source: string, runtimeImport = 'gio-uniap
   if (template === null) return { code: source, warnings: [], changed: false }
   if (template.src || (template.lang && template.lang !== 'html') || scriptSetup?.src || script?.src) return { code: source, changed: false, warnings: [{ code: 'sfc_parse_error', offset: template.loc.start.offset }] }
   let existing: string | null = null
-  let setupDefault: { start: number; end: number } | null = null
+  let methodsInsertion: { offset: number; existing: boolean } | null = null
+  let unsafeOptions = false
   try {
     for (const block of [scriptSetup, script]) {
       if (block === null) continue
       const ast = parseScript(block.content, { sourceType: 'module', plugins: ['typescript'] })
       for (const entry of ast.program.body) {
         if (block === script && scriptSetup === null && entry.type === 'ExportDefaultDeclaration') {
-          let hasSetup = entry.declaration.type !== 'ObjectExpression'
-          walk(entry.declaration, (value) => { if ((value.type === 'SpreadElement' || ['ObjectMethod', 'ObjectProperty'].includes(value.type)) && (value.type === 'SpreadElement' || node(value.key)?.name === 'setup' || value.computed || node(value.key)?.value === 'setup')) hasSetup = true })
-          if (hasSetup && entry.declaration.start != null && entry.declaration.end != null) setupDefault = { start: entry.declaration.start, end: entry.declaration.end }
+          const options = entry.declaration
+          if (options.type !== 'ObjectExpression' || options.properties.some((prop) => prop.type === 'SpreadElement' || prop.computed)) {
+            unsafeOptions = true
+          } else {
+            const methods = options.properties.filter((prop) => prop.type !== 'SpreadElement' && (prop.key.type === 'Identifier' ? prop.key.name : prop.key.type === 'StringLiteral' ? prop.key.value : '') === 'methods')
+            const method = methods[0]
+            if (methods.length > 1 || (method !== undefined && (method.type !== 'ObjectProperty' || method.value.type !== 'ObjectExpression' || method.value.properties.some((prop) => prop.type === 'SpreadElement' || prop.computed)))) unsafeOptions = true
+            else if (method?.type === 'ObjectProperty' && method.value.type === 'ObjectExpression' && method.value.start != null) methodsInsertion = { offset: method.value.start + 1, existing: true }
+            else if (options.start != null) methodsInsertion = { offset: options.start + 1, existing: false }
+          }
         }
         if (entry.type !== 'ImportDeclaration' || entry.source.value !== runtimeImport || !entry.leadingComments?.some((comment) => comment.value.trim() === marker)) continue
         for (const specifier of entry.specifiers) if (specifier.type === 'ImportSpecifier' && specifier.imported.type === 'Identifier' && specifier.imported.name === 'dispatchAutoTrack') existing = specifier.local.name
@@ -193,17 +201,16 @@ export function transformAutoTrackSfc(source: string, runtimeImport = 'gio-uniap
   const transformed = transformAutoTrackTemplate(template.content, dispatcher)
   const warnings = transformed.warnings.map((warning) => ({ ...warning, offset: warning.offset + template.loc.start.offset }))
   if (!transformed.changed) return { code: source, warnings, changed: false }
+  if (unsafeOptions) return { code: source, changed: false, warnings: [...warnings, { code: 'complex_component_options', offset: script?.loc.start.offset ?? 0 }] }
   const replacements: Replacement[] = [{ start: template.loc.start.offset, end: template.loc.end.offset, value: transformed.code }]
   if (existing === null) {
     const imported = `\n/* ${marker} */\nimport { dispatchAutoTrack as ${dispatcher} } from ${literal(runtimeImport)}\n`
     if (scriptSetup !== null) replacements.push({ start: scriptSetup.loc.start.offset, end: scriptSetup.loc.start.offset, value: imported })
-    else if (script !== null && setupDefault !== null) {
-      // 普通 setup 必须原样保留（包括 reactive、异步和 render 返回值），通过独立 methods 绑定暴露探针。
-      const component = `${dispatcher}Component`
-      const original = script.content.slice(setupDefault.start, setupDefault.end)
-      const wrapped = `((${component})=>({...${component},methods:{...${component}.methods,${dispatcher}}}))(${original})`
+    else if (script !== null && methodsInsertion !== null) {
+      // 直接向静态 methods 对象插入独立名称，不复制组件或提前读取业务 getter。
       replacements.push({ start: script.loc.start.offset, end: script.loc.start.offset, value: imported })
-      replacements.push({ start: script.loc.start.offset + setupDefault.start, end: script.loc.start.offset + setupDefault.end, value: wrapped })
+      const offset = script.loc.start.offset + methodsInsertion.offset
+      replacements.push({ start: offset, end: offset, value: methodsInsertion.existing ? `${dispatcher},` : `methods:{${dispatcher}},` })
     } else replacements.push({ start: 0, end: 0, value: `<script setup${script?.lang ? ` lang="${attribute(script.lang)}"` : ''}>${imported}</script>\n` })
   }
   return { code: apply(source, replacements), warnings, changed: true }
