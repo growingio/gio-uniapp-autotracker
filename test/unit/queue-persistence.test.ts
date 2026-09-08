@@ -105,4 +105,16 @@ describe('QueuePersistence', () => {
     await expect(persistence.persist(queue)).resolves.toStrictEqual({ kind: 'quota' })
     expect(persistence.currentRevision()).toBe(0)
   })
+  it('原样恢复已经清理过空公共字段的上报事件', async () => {
+    const backend = storage()
+    const queue = new EventQueue()
+    const cleaned = { ...event(1) } as Record<string, unknown>
+    for (const key of ['domain', 'appName', 'appVersion']) delete cleaned[key]
+    queue.enqueue(cleaned as ProtocolEvent)
+    await new QueuePersistence(backend.port, 'queue').persist(queue)
+    const restored = new EventQueue()
+    expect(await new QueuePersistence(backend.port, 'queue').hydrate(restored)).toBe('restored')
+    expect(restored.snapshot()[0]?.event).toEqual(cleaned)
+  })
+
 })

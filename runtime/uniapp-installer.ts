@@ -9,9 +9,9 @@ export type UniAppVueApp = Readonly<{
   mixin: (options: Readonly<Record<string, unknown>>) => void
 }>
 
-function record(value: unknown): Readonly<Record<string, unknown>> | null {
+function record(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? value as Readonly<Record<string, unknown>>
+    ? value as Record<string, unknown>
     : null
 }
 
@@ -27,6 +27,21 @@ function isPage(instance: VueInstance): boolean {
   return instance.$mpType === 'page' && routeOf(instance) !== null
 }
 
+function pageTitle(instance: VueInstance): string | null {
+  try {
+    if (typeof instance.gioPageTitle === 'string') return instance.gioPageTitle
+    const page = record(instance.$page)
+    const routes = (globalThis as Record<string, unknown>).__uniRoutes
+    const route = Array.isArray(routes) ? routes.find((item) => {
+      const path = record(item)?.path
+      return typeof path === 'string' && path.replace(/^\/+/, '') === routeOf(instance)
+    }) : null
+    const meta = record(page?.meta) ?? record(record(route)?.meta)
+    const title = record(meta?.navigationBar)?.titleText ?? meta?.navigationBarTitleText ?? page?.navigationBarTitleText
+    return typeof title === 'string' ? title : null
+  } catch { return null }
+}
+
 /**
  * Installs one global Vue mixin. It keeps host Vue/Page objects in a WeakMap and sends the core
  * only the route, query and title snapshots created by the existing bridges.
@@ -35,6 +50,8 @@ export function installUniAppLifecycle(app: UniAppVueApp, target: LifecycleTarge
   const appBridge = createAppLifecycleBridge(target)
   const pages = new WeakMap<object, PageBridge>()
   let nextPageId = 1
+  let currentPage: VueInstance | null = null
+  const titles = new WeakMap<object, string>()
 
   const pageBridge = (instance: VueInstance): PageBridge | null => {
     if (!isPage(instance)) return null
@@ -53,24 +70,56 @@ export function installUniAppLifecycle(app: UniAppVueApp, target: LifecycleTarge
     },
     onShow(this: VueInstance, options: unknown) {
       const bridge = pageBridge(this)
-      if (bridge !== null) bridge.onShow(typeof this.gioPageTitle === 'string' ? this.gioPageTitle : null)
+      if (bridge !== null) {
+        currentPage = this
+        bridge.onShow(typeof this.gioPageTitle === 'string' ? this.gioPageTitle : titles.get(this) ?? pageTitle(this))
+      }
       else appBridge.onShow(options)
     },
     onHide(this: VueInstance) {
       const bridge = pageBridge(this)
-      if (bridge !== null) bridge.onHide()
+      if (bridge !== null) { bridge.onHide(); if (currentPage === this) currentPage = null }
       else appBridge.onHide()
     },
     onLoad(this: VueInstance, query: unknown) {
       const bridge = pageBridge(this)
       const route = routeOf(this)
-      if (bridge !== null && route !== null) bridge.onLoad(route, query)
+      if (bridge !== null && route !== null) { currentPage = this; bridge.onLoad(route, query) }
     },
     onUnload(this: VueInstance) {
       pageBridge(this)?.onUnload()
+      pages.delete(this)
+      titles.delete(this)
+      if (currentPage === this) currentPage = null
     },
     onTabItemTap(this: VueInstance, options: unknown) {
       pageBridge(this)?.onTabItemTap(options)
     },
   })
+
+  try {
+    const host = record((globalThis as Record<string, unknown>).uni)
+    if (typeof host?.addInterceptor === 'function') {
+      host.addInterceptor('setNavigationBarTitle', {
+        invoke(options: unknown) {
+          try {
+            const args = record(options)
+            const page = currentPage
+            if (args === null || page === null || typeof args.title !== 'string') return
+            const title = args.title
+            const success = args.success
+            args.success = function(this: unknown, ...values: unknown[]) {
+              try {
+                if (pages.has(page)) {
+                  titles.set(page, title)
+                  pages.get(page)?.onTitleChanged(typeof page.gioPageTitle === 'string' ? page.gioPageTitle : title)
+                }
+              } catch { /* 采集状态更新不得影响业务回调。 */ }
+              if (typeof success === 'function') return success.apply(this, values)
+            }
+          } catch { /* 不可写的宿主参数保持原样。 */ }
+        },
+      })
+    }
+  } catch { /* 标题增强不可用时，基础生命周期仍正常安装。 */ }
 }

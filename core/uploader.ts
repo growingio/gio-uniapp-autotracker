@@ -23,6 +23,7 @@ export type UploaderDrop = Readonly<{
 export class Uploader {
   private active = 0
   private pendingRetries = 0
+  private readonly readyRetries: Array<{ batch: readonly QueueEntry[]; attempt: number }> = []
   private flushing = false
   private readonly drainWaiters = new Set<() => void>()
 
@@ -36,17 +37,32 @@ export class Uploader {
     private readonly onQueueChanged: () => void = () => undefined,
     /** Receives the already-sanitized protocol events immediately before a transport dispatch. */
     private readonly onBeforeDispatch: (events: readonly ProtocolEvent[]) => void = () => undefined,
+    private readonly canDispatch: () => boolean = () => true,
   ) {}
 
   public flush(): void {
     if (this.flushing) return
     this.flushing = true
-    while (this.active < MAX_CONCURRENT_UPLOADS) {
+    while (this.active < MAX_CONCURRENT_UPLOADS && this.canDispatch()) {
+      const retry = this.readyRetries.shift()
+      if (retry !== undefined) {
+        this.dispatch(retry.batch, retry.attempt)
+        continue
+      }
       const batch = this.queue.claimNextBatch()
       if (batch.length === 0) break
-      this.dispatch(batch, 0)
+      const attempt = batch[0]!.retryCount
+      if (attempt > RETRY_DELAYS_MS.length) {
+        const requestIds = batch.map((entry) => entry.requestId)
+        this.queue.remove(requestIds)
+        this.onQueueChanged()
+        this.onDrop({ requestIds, reason: 'retry_exhausted' })
+        continue
+      }
+      this.dispatch(batch, attempt)
     }
     this.flushing = false
+    this.notifyDrain()
   }
 
   public activeCount(): number {
@@ -101,13 +117,17 @@ export class Uploader {
         this.queue.remove(requestIds)
         this.queue.release(requestIds)
         this.onQueueChanged()
+      } else if ((result.kind === 'network' || result.kind === 'timeout') && !this.canDispatch()) {
+        // 飞行中遇到明确断网也保留事件；恢复网络后继续，不额外消耗重试额度。
+        this.readyRetries.push({ batch, attempt })
       } else if (isRetryableCollectorFailure(result) && attempt < RETRY_DELAYS_MS.length) {
         this.queue.incrementRetries(requestIds)
         this.onQueueChanged()
         this.pendingRetries += 1
         this.runtime.setTimeout(() => {
           this.pendingRetries -= 1
-          this.dispatch(batch, attempt + 1)
+          this.readyRetries.push({ batch, attempt: attempt + 1 })
+          this.flush()
         }, this.retryDelay(attempt))
       } else {
         this.queue.remove(requestIds)
@@ -130,7 +150,7 @@ export class Uploader {
   }
 
   private isDrained(): boolean {
-    return this.active === 0 && this.pendingRetries === 0 && this.queue.snapshot().length === 0
+    return this.active === 0 && this.pendingRetries === 0 && this.readyRetries.length === 0 && this.queue.snapshot().length === 0
   }
 
   private notifyDrain(): void {

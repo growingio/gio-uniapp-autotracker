@@ -1,13 +1,41 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { AppSystemContextPort } from '../../platform/app-system-context.js'
 
 describe('AppSystemContextPort', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it.each(['android', 'ios', 'harmonyos'])('使用 %s 的真实版本和宿主包字段，不能把引擎版本当应用版本', async (platform) => {
+    const port = new AppSystemContextPort({
+      getDeviceInfo: () => ({ platform, osVersion: '18.1', platformVersion: 'incorrect' }),
+      getSystemInfoSync: () => ({}),
+      getAppBaseInfo: () => ({ appVersion: '2.3.4', version: 'engine', hostPackageName: 'com.gio.host' }),
+    }, '0.1.0', 'fallback')
+    await expect(port.load()).resolves.toMatchObject({ platformVersion: '18.1', appVersion: '2.3.4', domain: 'com.gio.host' })
+  })
+
+  it('Android 包信息缺失时使用 Native.js，应用版本缺失才使用 fallback', async () => {
+    const activity = {}
+    const invoke = vi.fn((value, method) => value === activity && method === 'getPackageName' ? 'com.native.android' : '')
+    vi.stubGlobal('plus', { android: { runtimeMainActivity: () => activity, invoke } })
+    const port = new AppSystemContextPort({ getDeviceInfo: () => ({ platform: 'android' }), getSystemInfoSync: () => ({ system: 'Android 14' }), getAppBaseInfo: () => ({ version: 'engine' }) }, '0.1.0', 'fallback')
+    await expect(port.load()).resolves.toMatchObject({ domain: 'com.native.android', appVersion: 'fallback', platformVersion: '14' })
+  })
+
+  it('iOS Native.js 读取失败仍释放对象，且不会用 DCloud appid 冒充包名', async () => {
+    const bundle = {}
+    const deleteObject = vi.fn()
+    vi.stubGlobal('plus', { ios: { invoke: (_value: unknown, method: string) => { if (method === 'mainBundle') return bundle; throw new Error('unavailable') }, deleteObject } })
+    const port = new AppSystemContextPort({ getDeviceInfo: () => ({ platform: 'ios' }), getSystemInfoSync: () => ({}), getAppBaseInfo: () => ({ appId: '__UNI__123' }) }, '0.1.0', null)
+    await expect(port.load()).resolves.toMatchObject({ domain: '' })
+    expect(deleteObject).toHaveBeenCalledWith(bundle)
+  })
+
   it('maps Android host data to stable protocol context and normalizes screen orientation', async () => {
     const port = new AppSystemContextPort({
       getDeviceInfo: () => ({ platform: 'android', platformVersion: '14', screenWidth: 360, screenHeight: 640, brand: 'Google', model: 'Pixel', deviceType: 'PHONE' }),
       getSystemInfoSync: () => ({}),
-      getAppBaseInfo: () => ({ packageName: 'com.example', appName: 'Example', version: '2.0', appLanguage: 'zh_hans_cn' }),
+      getAppBaseInfo: () => ({ packageName: 'com.example', appName: 'Example', appVersion: '2.0', version: 'engine', appLanguage: 'zh_hans_cn' }),
     }, '0.1.0', 'fallback')
     await expect(port.load()).resolves.toMatchObject({
       platform: 'Android', domain: 'com.example', screenWidth: 360, screenHeight: 640, deviceType: 'PHONE', language: 'zh-Hans-CN', appVersion: '2.0', networkState: 'UNKNOWN',

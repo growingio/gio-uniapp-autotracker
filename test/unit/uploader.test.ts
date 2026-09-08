@@ -35,6 +35,89 @@ function runtime(): { value: UploaderRuntime; fireDelay: (delay: number) => void
 }
 
 describe('Uploader', () => {
+  it('明确断网时保留事件，后台强制发送也不能消耗队列', async () => {
+    let connected = false
+    const queue = new EventQueue()
+    queue.enqueue(event(1))
+    const callbacks: Array<(result: TransportResult) => void> = []
+    const clocks = runtime()
+    const uploader = new Uploader(queue, { dispatch: (_request, done) => { callbacks.push(done) } }, clocks.value, 'https://collector.example', 'account', undefined, undefined, undefined, () => connected)
+    const forced = uploader.forceFlush()
+    clocks.fireDelay(1_000)
+    await expect(forced).resolves.toBe(false)
+    expect(callbacks).toHaveLength(0)
+    expect(queue.snapshot()[0]?.retryCount).toBe(0)
+    connected = true
+    uploader.flush()
+    expect(callbacks).toHaveLength(1)
+    callbacks[0]!({ kind: 'success', status: 204 })
+    expect(queue.snapshot()).toEqual([])
+  })
+
+  it('到期重试遇到断网暂停，最后一次请求遇到断网失败也不丢弃', () => {
+    let connected = true
+    const queue = new EventQueue()
+    queue.restore([{ requestId: 'q1', event: event(1), retryCount: 1 }])
+    const callbacks: Array<(result: TransportResult) => void> = []
+    const clocks = runtime()
+    const drops: unknown[] = []
+    const uploader = new Uploader(queue, { dispatch: (_request, done) => { callbacks.push(done) } }, clocks.value, 'https://collector.example', 'account', drop => drops.push(drop), undefined, undefined, () => connected)
+    uploader.flush()
+    callbacks[0]!({ kind: 'network' })
+    expect(queue.snapshot()[0]?.retryCount).toBe(2)
+    connected = false
+    clocks.fireDelay(1_600)
+    expect(callbacks).toHaveLength(1)
+    connected = true
+    uploader.flush()
+    expect(callbacks).toHaveLength(2)
+    connected = false
+    callbacks[1]!({ kind: 'timeout' })
+    expect(drops).toEqual([])
+    expect(queue.snapshot()[0]?.retryCount).toBe(2)
+    connected = true
+    uploader.flush()
+    callbacks[2]!({ kind: 'success', status: 204 })
+    expect(queue.snapshot()).toEqual([])
+  })
+
+  it('恢复后按各自剩余额度发送，混合批次不会重置重试次数', () => {
+    const queue = new EventQueue()
+    expect(queue.restore([2, 0, 1].map((retryCount, i) => ({ requestId: `q${i + 1}`, event: event(i + 1), retryCount })))).toBe(true)
+    const sent: number[] = []
+    const callbacks: Array<(result: TransportResult) => void> = []
+    const clocks = runtime()
+    const uploader = new Uploader(queue, { dispatch: (request, done) => {
+      sent.push(...JSON.parse(request.body).map((event: ProtocolEvent) => event.eventSequenceId as number))
+      callbacks.push(done)
+    } }, clocks.value, 'https://collector.example', 'account')
+    uploader.flush()
+    expect(sent).toEqual([1, 2, 3])
+    callbacks[0]!({ kind: 'network' })
+    callbacks[1]!({ kind: 'network' })
+    callbacks[2]!({ kind: 'http', status: 503 })
+    clocks.fireDelay(800)
+    callbacks[3]!({ kind: 'network' })
+    clocks.fireDelay(1_600)
+    callbacks[4]!({ kind: 'network' })
+    callbacks[5]!({ kind: 'network' })
+    expect(sent.filter(sequence => sequence === 1)).toHaveLength(1)
+    expect(sent.filter(sequence => sequence === 2)).toHaveLength(3)
+    expect(sent.filter(sequence => sequence === 3)).toHaveLength(2)
+    expect(queue.snapshot()).toEqual([])
+    expect(clocks.scheduledDelays()).toEqual([])
+  })
+
+  it('超过重试额度的历史条目不再发送，后续有效条目仍正常上传', () => {
+    const queue = new EventQueue()
+    queue.restore([{ requestId: 'q1', event: event(1), retryCount: 3 }, { requestId: 'q2', event: event(2), retryCount: 0 }])
+    const sent: unknown[] = []
+    const uploader = new Uploader(queue, { dispatch: (request, done) => { sent.push(...JSON.parse(request.body)); done({ kind: 'success', status: 204 }) } }, runtime().value, 'https://collector.example', 'account')
+    uploader.flush()
+    expect(sent).toEqual([event(2)])
+    expect(queue.snapshot()).toEqual([])
+  })
+
   it('uses at most three concurrent slots and releases a fourth only after completion', () => {
     const queue = new EventQueue({ maxItems: 5, maxPersistedBytes: 5_000, maxEventBytes: 500, maxBatchEvents: 1, maxBatchBytes: 500 })
     for (let index = 1; index <= 4; index += 1) queue.enqueue(event(index))
@@ -123,4 +206,21 @@ describe('Uploader', () => {
     clocks.fireDelay(1_000)
     await expect(timedOut).resolves.toBe(false)
   })
+  it('新请求占满槽位时到期重试也必须等待', () => {
+    const queue = new EventQueue({ maxItems: 6, maxPersistedBytes: 5000, maxEventBytes: 500, maxBatchEvents: 1, maxBatchBytes: 500 })
+    for (let i = 1; i <= 5; i++) queue.enqueue(event(i))
+    const callbacks: Array<(result: TransportResult) => void> = []
+    const clocks = runtime()
+    const uploader = new Uploader(queue, { dispatch: (_request, done) => { callbacks.push(done) } }, clocks.value, 'https://collector.example', 'account')
+    uploader.flush()
+    callbacks[0]!({ kind: 'network' })
+    expect(callbacks).toHaveLength(4)
+    clocks.fireDelay(800)
+    expect(callbacks).toHaveLength(4)
+    expect(uploader.activeCount()).toBe(3)
+    callbacks[1]!({ kind: 'success', status: 204 })
+    expect(callbacks).toHaveLength(5)
+    expect(uploader.activeCount()).toBe(3)
+  })
+
 })

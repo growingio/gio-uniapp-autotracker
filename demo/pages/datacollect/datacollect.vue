@@ -1,25 +1,27 @@
 <template>
   <scroll-view class="page" scroll-y>
-    <view class="section"><text class="title">数据采集开关 / setOptions</text><text class="hint">初始值为 false。只有 { dataCollect: boolean } 是当前允许在初始化后修改的配置；开启时会重建访问边界并回放当前 PAGE。</text></view>
+    <view class="section"><text class="title">数据采集开关 / setOptions</text><text class="hint">demo 默认开启采集。只有 { dataCollect: boolean } 是当前允许在初始化后修改的配置；从关闭变为开启时会重建访问边界并回放当前 PAGE。</text></view>
     <view class="section">
       <text class="state">当前选择：{{ collecting ? '开启采集' : '关闭采集' }}</text>
-      <switch :checked="collecting" data-title="采集开关" @change="toggle" />
-      <button data-title="发送采集开关测试事件" @click="track">发送 datacollect_test_event</button>
-      <button class="secondary" data-title="验证非法 setOptions 参数" @click="invalidOptions">验证非法参数</button>
-      <button class="secondary" data-title="验证多字段 setOptions 参数" @click="multipleOptions">验证多字段参数</button>
+      <switch :checked="collecting" data-title="采集开关" @change="toggle($event)" />
+      <button data-title="发送采集开关测试事件" @click="track($event)">发送 datacollect_test_event</button>
+      <button class="secondary" data-title="验证非法 setOptions 参数" @click="invalidOptions($event)">验证非法参数</button>
+      <button class="secondary" data-title="验证多字段 setOptions 参数" @click="multipleOptions($event)">验证多字段参数</button>
     </view>
     <view class="section"><text class="result">{{ result }}</text></view>
   </scroll-view>
 </template>
 
 <script>
+import { dataCollectionState } from '../../sdk-state'
 export default {
-  data() { return { collecting: false, result: '默认关闭，尚未操作。' } },
+  data() { return { result: '尚未操作。' } },
+  computed: { collecting() { return dataCollectionState.enabled } },
   methods: {
     toggle(event) {
       const next = event.detail.value
       const ok = gdp('setOptions', { dataCollect: next })
-      if (ok) this.collecting = next
+      if (ok) dataCollectionState.enabled = next
       this.result = ok ? `setOptions({ dataCollect: ${next} }) 成功。` : 'setOptions 失败。'
     },
     track() { this.result = gdp('track', 'datacollect_test_event', { collecting: this.collecting }) ? '事件已入队。' : '事件未入队：采集关闭或 SDK 未就绪。' },

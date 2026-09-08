@@ -120,6 +120,8 @@ export class EventQueue {
     let body = '['
     for (const entry of this.entries) {
       if (excludeClaimed && this.claimed.has(entry.requestId)) continue
+      // 冷启动后的混合队列按剩余重试次数分批，旧事件不能借用新事件的额度。
+      if (excludeClaimed && batch.length > 0 && entry.retryCount !== batch[0]!.retryCount) break
       if (batch.length >= this.limits.maxBatchEvents) break
       const serialized = serializedEvent(entry.event)
       if (serialized === null) continue
@@ -186,7 +188,7 @@ export class EventQueue {
     if (serialized === null || utf8ByteLength(serialized) > this.limits.maxEventBytes || utf8ByteLength(`[${serialized}]`) > this.limits.maxBatchBytes) return false
     const event = candidate.event as ProtocolEvent
     if (typeof event.eventType !== 'string') return false
-    const rebuilt = buildAppEvent(event.eventType, event)
+    const rebuilt = buildAppEvent(event.eventType, event, true)
     return rebuilt.ok && JSON.stringify(rebuilt.event) === serialized
   }
 }

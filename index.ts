@@ -132,7 +132,8 @@ export const gdp: GdpCommand = (command: unknown, ...args: readonly unknown[]): 
       deviceIdFactory: guid,
       sessionIdFactory: guid,
     })
-    const builtinPlugins = pendingGdpPlugins.filter(isBuiltinPlugin)
+    const registered = new Set(tracker.registeredPluginNames())
+    const builtinPlugins = pendingGdpPlugins.filter(isBuiltinPlugin).filter((plugin) => !registered.has(plugin.name))
     if (!tracker.registerPlugins(...builtinPlugins) || !tracker.init({ ...init, accountId: args[0], dataSourceId: args[1] })) return false
     installUniAppLifecycle(uniVue, tracker)
     gdpTracker = tracker

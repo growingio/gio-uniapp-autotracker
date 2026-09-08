@@ -107,7 +107,7 @@ export function normalizeAttributes(input: unknown): NormalizedAttributes {
   return { attributes, diagnostics }
 }
 
-export function buildAppEvent(eventType: string, fields: Readonly<Record<string, unknown>>): BuildEventResult {
+export function buildAppEvent(eventType: string, fields: Readonly<Record<string, unknown>>, restored = false): BuildEventResult {
   if (!APP_EVENT_TYPES.includes(eventType as AppEventType)) return { ok: false, code: 'invalid_event_type' }
   const typedEventType = eventType as AppEventType
   if (typedEventType === 'CUSTOM' && (typeof fields.eventName !== 'string' || !CUSTOM_EVENT_NAME.test(fields.eventName))) {
@@ -119,7 +119,8 @@ export function buildAppEvent(eventType: string, fields: Readonly<Record<string,
   )
   // Common fields retain the established contract: present but empty values may be omitted from
   // the wire payload. Event-specific required fields, however, must still exist after cleanup.
-  if (REQUIRED_COMMON_FIELDS.some((key) => !(key in candidate))) return { ok: false, code: 'missing_required_field' }
+  // 缓存保存的是已清理空字段的上报事件，恢复时不再要求这些公共字段存在。
+  if (!restored && REQUIRED_COMMON_FIELDS.some((key) => !(key in candidate))) return { ok: false, code: 'missing_required_field' }
   const event = sanitizeOutboundEvent(candidate)
   if (REQUIRED_EVENT_FIELDS[typedEventType].some((key) => !(key in event))) return { ok: false, code: 'missing_required_field' }
   return { ok: true, event: event as ProtocolEvent }

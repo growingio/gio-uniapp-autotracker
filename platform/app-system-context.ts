@@ -22,6 +22,25 @@ function text(value: unknown, fallback = ''): string {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : fallback
 }
 
+/** 传统 App 的部分基座不返回包名，此时通过 Native.js 读取实际安装包标识。 */
+function nativeDomain(target: AppPlatform): string {
+  try {
+    const plus = record((globalThis as Record<string, unknown>).plus)
+    const native = record(plus[target === 'iOS' ? 'ios' : 'android'])
+    const invoke = native.invoke
+    if (typeof invoke !== 'function') return ''
+    if (target === 'Android' && typeof native.runtimeMainActivity === 'function') {
+      return text(invoke.call(native, native.runtimeMainActivity.call(native), 'getPackageName'))
+    }
+    if (target === 'iOS') {
+      const bundle = invoke.call(native, 'NSBundle', 'mainBundle')
+      try { return text(invoke.call(native, bundle, 'bundleIdentifier')) }
+      finally { if (typeof native.deleteObject === 'function') native.deleteObject.call(native, bundle) }
+    }
+  } catch { /* 宿主能力不可用时省略包名，不用 DCloud appid 冒充。 */ }
+  return ''
+}
+
 function platform(value: unknown): AppPlatform | null {
   const normalized = text(value).toLowerCase()
   if (normalized === 'android') return 'Android'
@@ -65,10 +84,10 @@ export class AppSystemContextPort implements SystemContextPort {
     if (targetPlatform === null) throw new Error('unsupported_platform')
     const width = dimension(device.screenWidth) ?? dimension(system.screenWidth) ?? 0
     const height = dimension(device.screenHeight) ?? dimension(system.screenHeight) ?? 0
-    const domain = targetPlatform === 'iOS' ? text(app.bundleId) : targetPlatform === 'Android' ? text(app.packageName) : text(app.bundleName)
+    const domain = (targetPlatform === 'iOS' ? text(app.bundleId) : targetPlatform === 'Android' ? text(app.packageName) : text(app.bundleName ?? app.packageName)) || text(app.hostPackageName ?? system.hostPackageName) || nativeDomain(targetPlatform)
     return {
       platform: targetPlatform,
-      platformVersion: text(device.platformVersion ?? system.system, 'UNKNOWN'),
+      platformVersion: text(device.osVersion, text(system.osVersion, text(device.platformVersion, text(system.system).replace(/^(?:iOS|Android|HarmonyOS)\s*/i, '') || 'UNKNOWN'))),
       domain,
       appState: 'FOREGROUND',
       appName: text(app.appName),
@@ -78,7 +97,7 @@ export class AppSystemContextPort implements SystemContextPort {
       deviceBrand: text(device.deviceBrand ?? device.brand ?? system.deviceBrand ?? system.brand, 'UNKNOWN'),
       deviceModel: text(device.deviceModel ?? device.model ?? system.deviceModel ?? system.model, 'UNKNOWN'),
       deviceType: targetPlatform === 'Android' ? androidDeviceType(Math.min(width, height)) : deviceType(device.deviceType),
-      appVersion: text(app.version, this.appVersionFallback ?? ''),
+      appVersion: text(app.appVersion, text(system.appVersion, this.appVersionFallback ?? '')),
       language: language(app.appLanguage ?? app.language),
       sdkVersion: this.sdkVersion,
     }

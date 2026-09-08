@@ -37,6 +37,7 @@ function timezoneOffset(timezone: TimezonePort): string {
  * business input never creates a gap in `eventSequenceId`.
  */
 export class EventComposer {
+  private appState: AppSystemContext['appState'] = 'FOREGROUND'
   public constructor(
     private readonly config: ResolvedGioConfig,
     private readonly system: AppSystemContext,
@@ -49,6 +50,8 @@ export class EventComposer {
     private readonly location: LocationState,
     private readonly network: (() => NetworkState) | undefined = undefined,
   ) {}
+
+  public setAppState(value: AppSystemContext['appState']): void { this.appState = value }
 
   public compose(input: EventComposeInput): EventComposeResult {
     const session = this.sessions.current()
@@ -72,7 +75,7 @@ export class EventComposer {
       sessionId: session.sessionId,
       dataSourceId: this.config.dataSourceId,
       timestamp,
-      appState: input.appState ?? this.system.appState,
+      appState: input.appState ?? this.appState,
       appChannel: this.config.appChannel,
       networkState: this.networkState(),
       timezoneOffset: timezoneOffset(this.timezone),

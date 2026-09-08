@@ -39,9 +39,10 @@ export interface LoggerPort {
   debug(message: string, data?: unknown): void
 }
 
-/** Network state is best effort. UNKNOWN includes offline and must never block queueing. */
+/** 协议网络类型与连接状态分开；UNKNOWN 不能直接当成断网。 */
 export interface NetworkPort {
   current(): Promise<NetworkState>
+  isConnected(): boolean | null
   subscribe(listener: (state: NetworkState) => void): () => void
 }
 

@@ -90,7 +90,7 @@ export class SessionManager {
   /** Anonymous → A and A → empty preserve the session; A → B starts a new one. */
   public onUserIdChange(previousUserId: string | null | undefined, nextUserId: string | null | undefined): SessionTransition {
     if (isLoggedIn(previousUserId) && isLoggedIn(nextUserId) && previousUserId !== nextUserId) {
-      return this.replace(createSession(this.idFactory, 'user_changed'))
+      return this.replace(createSession(this.idFactory, 'user_changed'), true)
     }
     if (this.snapshot === null) return { snapshot: null, startedNew: false, reason: null }
     return { snapshot: this.snapshot, startedNew: false, reason: null }
@@ -98,12 +98,15 @@ export class SessionManager {
 
   /** Privacy consent false → true always starts a fresh visit/session. */
   public onCollectionResumed(): SessionTransition {
-    return this.replace(createSession(this.idFactory, 'collection_resumed'))
+    return this.replace(createSession(this.idFactory, 'collection_resumed'), true)
   }
 
-  private replace(transition: SessionTransition): SessionTransition {
+  private replace(transition: SessionTransition, preserveCloseTime = false): SessionTransition {
     if (transition.snapshot === null) throw new Error('session_transition_missing_snapshot')
-    this.snapshot = transition.snapshot
-    return transition
+    // 后台更新身份或采集开关不会让 App 回到前台，必须保留离开时间。
+    this.snapshot = preserveCloseTime
+      ? { ...transition.snapshot, lastCloseTime: this.snapshot?.lastCloseTime ?? null }
+      : transition.snapshot
+    return { ...transition, snapshot: this.snapshot }
   }
 }

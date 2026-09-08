@@ -19,8 +19,11 @@ export class PageStore {
   private readonly pages = new Map<string, PageSnapshot>()
   private currentInstanceId: string | null = null
   private nextPageNumber = 1
+  private readonly automaticReferrals = new Set<string>()
+  private lastShownRoute: string | null = null
+  private lastShownPageKey: string | null = null
 
-  /** Freezes the page's onLoad query and referral. Repeated load calls cannot overwrite them. */
+  /** 冻结 onLoad query 与显式来源；自动来源在真实页面切换时更新。 */
   public onLoad(input: PageLoadInput): PageSnapshot | null {
     if (!this.validLoadInput(input)) return null
     const existing = this.pages.get(input.instanceId)
@@ -30,9 +33,10 @@ export class PageStore {
       route: input.route,
       query: input.query,
       title: null,
-      referralPage: input.referralPage,
+      referralPage: input.referralPage ?? this.lastShownRoute,
       shownAt: null,
     }
+    if (input.referralPage === null) this.automaticReferrals.add(input.instanceId)
     this.pages.set(input.instanceId, snapshot)
     return snapshot
   }
@@ -42,10 +46,19 @@ export class PageStore {
     if (!Number.isFinite(shownAt) || shownAt < 0 || typeof title !== 'string' && title !== null) return null
     const page = this.pages.get(instanceId)
     if (page === undefined) return null
-    const snapshot = { ...page, title, shownAt }
+    const referralPage = this.automaticReferrals.has(instanceId) && this.lastShownRoute !== null && this.lastShownPageKey !== page.pageKey
+      ? this.lastShownRoute : page.referralPage
+    const snapshot = { ...page, title, shownAt, referralPage }
     this.pages.set(instanceId, snapshot)
     this.currentInstanceId = instanceId
+    this.lastShownRoute = page.route
+    this.lastShownPageKey = page.pageKey
     return snapshot
+  }
+
+  public setTitle(instanceId: string, title: string): void {
+    const page = this.pages.get(instanceId)
+    if (page !== undefined) this.pages.set(instanceId, { ...page, title })
   }
 
   /** Page hide never means App background; it only removes this instance as the current context. */
@@ -55,6 +68,7 @@ export class PageStore {
 
   public onUnload(instanceId: string): void {
     this.pages.delete(instanceId)
+    this.automaticReferrals.delete(instanceId)
     if (this.currentInstanceId === instanceId) this.currentInstanceId = null
   }
 

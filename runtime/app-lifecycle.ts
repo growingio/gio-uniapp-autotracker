@@ -55,6 +55,7 @@ export class AppLifecycle {
   }
 
   public onShow(entry: AppEntrySnapshot): AppShowResult {
+    this.dependencies.composer.setAppState('FOREGROUND')
     this.currentEntry = normalizeEntry(entry)
     const session = this.coldStartPending
       ? this.dependencies.sessions.onProcessLaunch()
@@ -86,6 +87,7 @@ export class AppLifecycle {
 
   /** Best effort only: persistence and flush failures cannot block the host entering background. */
   public onHide(): AppHideResult {
+    this.dependencies.composer.setAppState('BACKGROUND')
     const session = this.dependencies.sessions.hide(this.dependencies.clock.now())
     const page = this.dependencies.currentPage?.() ?? null
     const appClosedQueued = session !== null && this.dependencies.canCollect()

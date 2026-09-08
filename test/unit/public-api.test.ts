@@ -44,6 +44,7 @@ describe('public API', () => {
       expect(gdp('registerPlugins', [{ name: 'gioEventAutoTracking' }])).toBe(true)
       const install = vi.fn()
       expect(gdp('registerPlugins', [{ name: 'customer-plugin', install }])).toBe(true)
+      expect(gdp('init', '', 'source', { uniVue: app, dataCollect: false })).toBe(false)
       expect(gdp('init', 'account', 'source', { uniVue: app, dataCollect: false })).toBe(true)
       expect(app.use).not.toHaveBeenCalled()
       expect(app.mixin).toHaveBeenCalledOnce()

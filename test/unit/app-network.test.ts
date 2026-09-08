@@ -1,8 +1,47 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { AppNetworkPort, normalizeAppNetworkState } from '../../platform/app-network.js'
 
 describe('AppNetworkPort', () => {
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
+
+  it('明确断网与类型未知分别保留，未知代际也可以明确联网', async () => {
+    let listener!: (result: { networkType?: unknown; isConnected?: unknown }) => void
+    const port = new AppNetworkPort({ getNetworkType: options => options.success({ networkType: 'none' }), onNetworkStatusChange: next => { listener = next } })
+    expect(port.isConnected()).toBeNull()
+    await expect(port.current()).resolves.toBe('UNKNOWN')
+    expect(port.isConnected()).toBe(false)
+    port.subscribe(() => undefined)
+    listener({ networkType: 'unknown', isConnected: true })
+    expect(port.isConnected()).toBe(true)
+    listener({ networkType: 'wifi', isConnected: false })
+    expect(port.isConnected()).toBe(false)
+  })
+
+  it('迟到的联网查询不能覆盖新的断网通知，查询超时也不能解除断网', async () => {
+    vi.useFakeTimers()
+    let reply!: (result: { networkType: string }) => void
+    let listener!: (result: { networkType: string; isConnected: boolean }) => void
+    const port = new AppNetworkPort({ getNetworkType: options => { reply = options.success }, onNetworkStatusChange: next => { listener = next } })
+    port.subscribe(() => undefined)
+    const reading = port.current()
+    listener({ networkType: 'none', isConnected: false })
+    reply({ networkType: 'wifi' })
+    await expect(reading).resolves.toBe('UNKNOWN')
+    expect(port.isConnected()).toBe(false)
+    const timedOut = port.current()
+    await vi.advanceTimersByTimeAsync(1_000)
+    await expect(timedOut).resolves.toBe('UNKNOWN')
+    expect(port.isConnected()).toBe(false)
+  })
+
+  it('Native.js 明确断网的回退读数会阻止上传', async () => {
+    vi.stubGlobal('plus', { networkinfo: { CONNECTION_NONE: 1, getCurrentType: () => 1 } })
+    const port = new AppNetworkPort({ getNetworkType: options => options.fail() })
+    await expect(port.current()).resolves.toBe('UNKNOWN')
+    expect(port.isConnected()).toBe(false)
+  })
+
   it('normalizes only documented generations and keeps offline, cellular and failures UNKNOWN', () => {
     expect(normalizeAppNetworkState('wifi')).toBe('WIFI')
     expect(normalizeAppNetworkState('5g')).toBe('5G')

@@ -1,6 +1,7 @@
 import App from './App.vue'
 import { createSSRApp } from 'vue'
 import gdp from '@/uni_modules/gio-uniapp-autotracker/index.js'
+import { dataCollectionState } from './sdk-state'
 
 export function createApp() {
   const app = createSSRApp(App)
@@ -10,6 +11,7 @@ export function createApp() {
     uniVue: app,
     idMapping: true,
     debug: true,
+    dataCollect: dataCollectionState.enabled,
   })
   return { app }
 }

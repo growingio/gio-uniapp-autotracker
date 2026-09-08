@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { installUniAppLifecycle, type UniAppVueApp } from '../../runtime/uniapp-installer.js'
 
@@ -12,6 +12,7 @@ type HookSet = Readonly<{
 }>
 
 describe('installUniAppLifecycle', () => {
+  afterEach(() => vi.unstubAllGlobals())
   it('owns App and Page lifecycle forwarding through one Vue global mixin', () => {
     let hooks: HookSet | null = null
     const app: UniAppVueApp = {
@@ -54,5 +55,79 @@ describe('installUniAppLifecycle', () => {
       ['page-unload', 'pages/order/detail-1'],
       ['app-hide', null],
     ])
+  })
+})
+
+
+function titleFixture() {
+  let hooks!: HookSet
+  let interceptor!: { invoke: (options: unknown) => void }
+  vi.stubGlobal('uni', { addInterceptor: (name: string, value: typeof interceptor) => { expect(name).toBe('setNavigationBarTitle'); interceptor = value } })
+  vi.stubGlobal('__uniRoutes', [{ path: '/pages/home', meta: { navigationBar: { titleText: '配置标题' } } }])
+  const target = {
+    onAppLaunch: () => true, onAppShow: () => true, onAppHide: () => true,
+    onPageLoad: () => true, onPageShow: vi.fn(() => true), onPageHide: () => true, onPageUnload: () => true,
+    onPageTitleChanged: vi.fn(() => true), autoTrack: () => true,
+  }
+  installUniAppLifecycle({ mixin: value => { hooks = value as HookSet } }, target)
+  const page = { $mpType: 'page', $page: { route: 'pages/home' } } as Record<string, unknown>
+  hooks.onLoad.call(page, {})
+  return { hooks, interceptor, target, page }
+}
+
+describe('自动导航标题', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('配置标题、onLoad 中成功更新的动态标题、显式覆盖按优先级生效', () => {
+    const { hooks, interceptor, target, page } = titleFixture()
+    hooks.onShow.call(page, {})
+    expect(target.onPageShow).toHaveBeenLastCalledWith('pages/home-1', '配置标题')
+    const values: Record<string, unknown> = { title: '动态标题' }
+    interceptor.invoke(values)
+    ;(values.success as () => void)()
+    expect(target.onPageTitleChanged).toHaveBeenLastCalledWith('pages/home-1', '动态标题')
+    hooks.onHide.call(page)
+    hooks.onShow.call(page, {})
+    expect(target.onPageShow).toHaveBeenLastCalledWith('pages/home-1', '动态标题')
+    page.gioPageTitle = '自定义标题'
+    hooks.onShow.call(page, {})
+    expect(target.onPageShow).toHaveBeenLastCalledWith('pages/home-1', '自定义标题')
+  })
+
+  it('业务成功回调的 this、参数、返回值和异常不受采集失败影响', () => {
+    const { interceptor, target } = titleFixture()
+    target.onPageTitleChanged.mockImplementation(() => { throw new Error('采集异常') })
+    const receiver = {}
+    const success = vi.fn(function(this: unknown, ...values: unknown[]) { return { receiver: this, values } })
+    const options = { title: 'onLoad 标题', success }
+    interceptor.invoke(options)
+    expect(options.success.call(receiver, 1, 2)).toEqual({ receiver, values: [1, 2] })
+    expect(success).toHaveBeenCalledTimes(1)
+    const error = new Error('业务异常')
+    const throwing = { title: '异常', success: () => { throw error } }
+    interceptor.invoke(throwing)
+    expect(() => throwing.success()).toThrow(error)
+  })
+
+  it('失败调用不更新标题，已卸载页面的迟到回调仍执行业务代码', () => {
+    const { hooks, interceptor, target, page } = titleFixture()
+    interceptor.invoke({ title: '失败', fail: () => undefined })
+    expect(target.onPageTitleChanged).not.toHaveBeenCalled()
+    const success = vi.fn()
+    const options = { title: '迟到', success }
+    interceptor.invoke(options)
+    hooks.onUnload.call(page)
+    options.success()
+    expect(target.onPageTitleChanged).not.toHaveBeenCalled()
+    expect(success).toHaveBeenCalledOnce()
+    expect(() => interceptor.invoke(Object.freeze({ title: '冻结参数' }))).not.toThrow()
+  })
+
+  it('标题拦截器安装失败不能阻止基础生命周期安装', () => {
+    const { target } = titleFixture()
+    vi.stubGlobal('uni', { addInterceptor: () => { throw new Error('不支持') } })
+    const mixin = vi.fn()
+    expect(() => installUniAppLifecycle({ mixin }, target)).not.toThrow()
+    expect(mixin).toHaveBeenCalledOnce()
   })
 })

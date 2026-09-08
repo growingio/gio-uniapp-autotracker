@@ -1,3 +1,5 @@
+import { storageKeys } from '../../core/storage-keys.js'
+import { readIdentityRecord } from '../../core/identity.js'
 import { testAutoTrackProfile } from '../support/autotrack-fixture.js'
 import { describe, expect, it } from 'vitest'
 
@@ -45,13 +47,87 @@ function createTracker(dataCollect = true, autoTracking = false, debug = false, 
 }
 
 describe('TrackerRuntime', () => {
+  it('50 条启动业务调用不会挤掉 App 和首屏生命周期', async () => {
+    const { tracker } = createTracker()
+    for (let i = 0; i < 50; i++) expect(tracker.track(`early_${i}`)).toBe(true)
+    expect(tracker.track('overflow')).toBe(false)
+    expect(tracker.onAppLaunch({ path: '/home', query: '' })).toBe(true)
+    expect(tracker.onAppShow({ path: '/home', query: '' })).toBe(true)
+    expect(tracker.onPageLoad({ instanceId: 'home', route: 'pages/home', query: '', referralPage: null })).toBe(true)
+    expect(tracker.onPageShow('home', '首页')).toBe(true)
+    await tracker.whenReady()
+    const events = tracker.queuedEvents()
+    expect(events.map(event => event.eventType)).toEqual(['VISIT', ...Array(50).fill('CUSTOM'), 'PAGE'])
+    expect(events.filter(event => event.eventType === 'CUSTOM').map(event => event.eventName)).toEqual(Array.from({ length: 50 }, (_, i) => `early_${i}`))
+    expect(new Set(events.map(event => event.sessionId)).size).toBe(1)
+    expect(tracker.track('after_ready')).toBe(true)
+  })
+
+  it('属性在初始化期间、等待首个会话期间和就绪后具有相同语义', async () => {
+    const run = async (phase: 'hydrating' | 'before-show' | 'ready') => {
+      const { tracker } = createTracker()
+      if (phase !== 'hydrating') await tracker.whenReady()
+      if (phase === 'ready') tracker.onAppShow({ path: '/home', query: '' })
+      const properties = { missing: undefined as string | undefined, invalid: NaN, infinite: Infinity, invalidDate: new Date(NaN), date: new Date(0), list: [undefined, null, false, 0] }
+      expect(tracker.track('attributes', properties)).toBe(true)
+      expect(tracker.setUserAttributes({ missing: undefined })).toBe(true)
+      properties.missing = 'later'
+      if (phase !== 'ready') tracker.onAppShow({ path: '/home', query: '' })
+      await tracker.whenReady()
+      return tracker.queuedEvents().filter(event => ['CUSTOM', 'LOGIN_USER_ATTRIBUTES'].includes(event.eventType)).map(event => event.attributes)
+    }
+    const expected = [{ missing: '', date: '1970-01-01T00:00:00.000Z', list: '||||false||0' }, { missing: '' }]
+    for (const phase of ['hydrating', 'before-show', 'ready'] as const) expect(await run(phase)).toEqual(expected)
+  })
+
+  it('关闭采集时不读取属性 getter，开启时隔离 getter 异常', async () => {
+    const { tracker } = createTracker(false)
+    let reads = 0
+    const properties = { get value() { reads++; throw new Error('业务 getter') } }
+    expect(tracker.track('hidden', properties)).toBe(false)
+    expect(tracker.setUserAttributes(properties)).toBe(false)
+    expect(reads).toBe(0)
+    tracker.setDataCollect(true)
+    expect(tracker.track('visible', properties)).toBe(false)
+    expect(reads).toBe(1)
+    await tracker.whenReady()
+  })
+
+  it.each(['user', 'collection'])('后台 %s 更新后的前台恢复仍生成超时 VISIT', async (reason) => {
+    const { tracker, setNow } = createTracker()
+    tracker.setUserId('A')
+    tracker.onAppShow({ path: '/home', query: '' })
+    await tracker.whenReady()
+    tracker.onAppHide()
+    if (reason === 'user') tracker.setUserId('B')
+    else { tracker.setDataCollect(false); tracker.setDataCollect(true) }
+    const background = tracker.queuedEvents().at(-1)!
+    expect(background).toMatchObject({ eventType: 'VISIT', appState: 'BACKGROUND' })
+    setNow(30_101)
+    tracker.onAppShow({ path: '/home', query: '' })
+    const foreground = tracker.queuedEvents().at(-1)!
+    expect(foreground).toMatchObject({ eventType: 'VISIT', appState: 'FOREGROUND' })
+    expect(foreground.sessionId).not.toBe(background.sessionId)
+  })
+
+  it('首次显示前连续切换身份不会提前创建会话，首个 VISIT 使用最终身份', async () => {
+    const { tracker } = createTracker()
+    tracker.setUserId('A')
+    tracker.setUserId('B')
+    await tracker.whenReady()
+    expect(tracker.queuedEvents()).toEqual([])
+    tracker.onAppLaunch({ path: '/home', query: '' })
+    tracker.onAppShow({ path: '/home', query: '' })
+    expect(tracker.queuedEvents()).toMatchObject([{ eventType: 'VISIT', userId: 'B', sessionId: 'session-1', path: '/home' }])
+  })
+
   it('reports bootstrap failure when runtime setup throws after hydration', async () => {
     const errors: string[] = []
     const tracker = new TrackerRuntime({
       storage: new MemoryStorage(), systemContext: { load: async () => system }, clock: { now: () => 100 },
       timezone: { getOffsetMinutes: () => -480 }, deviceIdFactory: () => 'device-1', sessionIdFactory: () => 'session-1',
       orientation: () => 'PORTRAIT',
-      network: { current: async () => 'WIFI', subscribe: () => { throw new TypeError('host setup failed') } },
+      network: { current: async () => 'WIFI', isConnected: () => true, subscribe: () => { throw new TypeError('host setup failed') } },
       logger: { info: () => undefined, success: () => undefined, warn: () => undefined, debug: () => undefined, error: (message) => errors.push(message) },
     })
     tracker.init({ accountId: 'account', dataSourceId: 'source' })
@@ -213,6 +289,7 @@ describe('TrackerRuntime', () => {
   it('uses new network state for future events and wakes the uploader only when connectivity recovers', async () => {
     const networkState = { listener: null as ((state: NetworkState) => void) | null }
     const network: NetworkPort = {
+      isConnected: () => null,
       current: async () => 'UNKNOWN',
       subscribe: (next) => { networkState.listener = next; return () => { networkState.listener = null } },
     }
@@ -279,4 +356,70 @@ describe('TrackerRuntime', () => {
     expect(tracker.setUserId('user-b', 'key-b')).toBe(true)
     expect(warnings).toStrictEqual(['[GrowingIO]: userKey ignored because idMapping is disabled'])
   })
+  it('在首次 AppShow 建立会话后按原顺序处理早期事件和身份修改', async () => {
+    const { tracker } = createTracker()
+    expect(tracker.setUserId('A')).toBe(true)
+    expect(tracker.setLocation(30, 120)).toBe(true)
+    expect(tracker.track('early')).toBe(true)
+    expect(tracker.setUserId('B')).toBe(true)
+    expect(tracker.setUserAttributes({ role: 'member' })).toBe(true)
+    tracker.onAppLaunch({ path: '/home', query: '' })
+    await tracker.whenReady()
+    expect(tracker.queuedEvents()).toEqual([])
+    tracker.onAppShow({ path: '/home', query: '' })
+    expect(tracker.queuedEvents()).toMatchObject([
+      { eventType: 'VISIT', userId: 'A' },
+      { eventType: 'CUSTOM', eventName: 'early', userId: 'A', latitude: 30, longitude: 120 },
+      { eventType: 'VISIT', userId: 'B' },
+      { eventType: 'LOGIN_USER_ATTRIBUTES', userId: 'B', attributes: { role: 'member' } },
+    ])
+  })
+
+  it('初始化期间同意采集只产生一组 VISIT 和 PAGE', async () => {
+    const { tracker } = createTracker(false)
+    tracker.onAppLaunch({ path: '/privacy', query: '' })
+    tracker.onAppShow({ path: '/privacy', query: '' })
+    tracker.onPageLoad({ instanceId: 'privacy', route: 'privacy', query: '', referralPage: null })
+    tracker.onPageShow('privacy', '隐私')
+    tracker.setDataCollect(true)
+    await tracker.whenReady()
+    expect(tracker.queuedEvents().map((event) => event.eventType)).toEqual(['VISIT', 'PAGE'])
+    expect(new Set(tracker.queuedEvents().map((event) => event.sessionId)).size).toBe(1)
+    expect(tracker.setDataCollect(true)).toBe(true)
+    expect(tracker.queuedEvents()).toHaveLength(2)
+  })
+
+  it('后台业务事件读取实时 App 状态', async () => {
+    const { tracker } = createTracker()
+    tracker.onAppShow({ path: '/home', query: '' })
+    await tracker.whenReady()
+    tracker.onAppHide()
+    tracker.track('background')
+    expect(tracker.queuedEvents().at(-1)).toMatchObject({ appState: 'BACKGROUND' })
+    tracker.onAppShow({ path: '/home', query: '' })
+    tracker.track('foreground')
+    expect(tracker.queuedEvents().at(-1)).toMatchObject({ appState: 'FOREGROUND' })
+  })
+
+  it('关闭 idMapping 后清理恢复的 userKey，保留 deviceId 和 userId', async () => {
+    const storage = new MemoryStorage()
+    const deps = { storage, systemContext: { load: async () => system }, clock: { now: () => 100 }, timezone: { getOffsetMinutes: () => 0 },
+      deviceIdFactory: () => 'device', sessionIdFactory: () => 'session', orientation: () => 'PORTRAIT' as const }
+    const first = new TrackerRuntime(deps)
+    first.init({ accountId: 'account', dataSourceId: 'source', idMapping: true })
+    first.onAppShow({ path: '/home', query: '' })
+    await first.whenReady()
+    first.setUserId('user', 'old-key')
+    const second = new TrackerRuntime(deps)
+    second.init({ accountId: 'account', dataSourceId: 'source', idMapping: false })
+    second.onAppLaunch({ path: '/home', query: '' })
+    second.onAppShow({ path: '/home', query: '' })
+    await second.whenReady()
+    second.track('after_restore')
+    expect(second.queuedEvents().at(-1)).toMatchObject({ deviceId: 'device', userId: 'user' })
+    expect(second.queuedEvents().at(-1)).not.toHaveProperty('userKey')
+    const stored = await storage.read('state', storageKeys('source').identity)
+    expect(stored.kind === 'value' && readIdentityRecord(stored.value, 'source')).toMatchObject({ identity: { userKey: null } })
+  })
+
 })

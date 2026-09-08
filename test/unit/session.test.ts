@@ -8,6 +8,23 @@ function ids(...values: string[]): () => string {
 }
 
 describe('SessionManager', () => {
+  it.each(['user', 'collection'])('后台因 %s 换会话后，仍按离开时间判断超时', (reason) => {
+    const session = new SessionManager({ timeoutMs: 30_000 }, ids('initial', 'background', 'resumed'))
+    session.resume(1)
+    session.hide(100)
+    const transition = reason === 'user' ? session.onUserIdChange('A', 'B') : session.onCollectionResumed()
+    expect(transition.snapshot).toEqual({ sessionId: 'background', lastCloseTime: 100 })
+    expect(session.resume(30_101)).toMatchObject({ startedNew: true, reason: 'timeout', snapshot: { sessionId: 'resumed', lastCloseTime: null } })
+  })
+
+  it('后台更新身份后，超时边界内仍沿用新身份会话', () => {
+    const session = new SessionManager({ timeoutMs: 30_000 }, ids('initial', 'background'))
+    session.resume(1)
+    session.hide(100)
+    session.onUserIdChange('A', 'B')
+    expect(session.resume(30_100)).toMatchObject({ startedNew: false, snapshot: { sessionId: 'background', lastCloseTime: null } })
+  })
+
   it('starts the first session and keeps it across an App.onShow without a close time', () => {
     const session = new SessionManager({ timeoutMs: 30_000 }, ids('first'))
 

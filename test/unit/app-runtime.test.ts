@@ -4,6 +4,28 @@ import { createAppTracker } from '../../platform/app-runtime.js'
 import { dispatchAutoTrack } from '../../runtime/autotrack-dispatch.js'
 
 describe('createAppTracker', () => {
+  it('断网冷启动先持久化，恢复为未知网络类型但明确联网时补发', async () => {
+    const values = new Map<string, string>()
+    let listener!: (result: { networkType: string; isConnected: boolean }) => void
+    const request = vi.fn((options: { data: string; success: (value: { statusCode: number }) => void }) => options.success({ statusCode: 204 }))
+    const tracker = createAppTracker({
+      getStorageSync: key => values.get(key), setStorageSync: (key, value) => { values.set(key, value) }, removeStorageSync: key => { values.delete(key) },
+      getDeviceInfo: () => ({ platform: 'android' }), getSystemInfoSync: () => ({}), getAppBaseInfo: () => ({}),
+      getNetworkType: options => options.success({ networkType: 'none' }), onNetworkStatusChange: next => { listener = next }, request,
+    }, { sdkVersion: '0.1.0', deviceIdFactory: () => 'device', sessionIdFactory: () => 'session' })
+    tracker.init({ accountId: 'account', dataSourceId: 'source' })
+    tracker.onAppShow({ path: '/home', query: '' })
+    tracker.track('offline_event')
+    await tracker.whenReady()
+    await vi.waitFor(() => expect([...values.values()].some(value => value.includes('offline_event'))).toBe(true))
+    expect(request).not.toHaveBeenCalled()
+    expect(tracker.queuedEvents().map(event => event.eventType)).toEqual(['VISIT', 'CUSTOM'])
+    listener({ networkType: 'unknown', isConnected: true })
+    expect(request).toHaveBeenCalledOnce()
+    expect(JSON.parse(request.mock.calls[0]![0].data).map((event: { networkState: string }) => event.networkState)).toEqual(['UNKNOWN', 'UNKNOWN'])
+    expect(tracker.queuedEvents()).toEqual([])
+  })
+
   it('initializes and sends change events when the App engine has no Object.hasOwn', async () => {
     const payloads: string[] = []
     const tracker = createAppTracker({

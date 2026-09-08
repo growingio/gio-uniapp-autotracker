@@ -1,4 +1,5 @@
 import { EventComposer } from '../core/event-composer.js'
+import { BootstrapBuffer } from '../core/bootstrap-buffer.js'
 import type { GioInitOptions, ResolvedGioConfig } from '../core/config.js'
 import { EventSequence } from '../core/event-sequence.js'
 import { hydrateTrackerState } from '../core/hydration.js'
@@ -8,7 +9,7 @@ import { LocationState } from '../core/location-state.js'
 import { MetaPersistence } from '../core/meta-persistence.js'
 import { PageStore, type PageLoadInput } from '../core/page-store.js'
 import type { ClockPort, LoggerPort, NetworkPort, NetworkState, StoragePort, SystemContextPort, TimezonePort, TransportPort } from '../core/ports.js'
-import type { ProtocolEvent } from '../core/protocol.js'
+import { normalizeAttributes, type ProtocolEvent } from '../core/protocol.js'
 import { EventQueue } from '../core/queue.js'
 import { QueuePersistence } from '../core/queue-persistence.js'
 import { SessionPersistence } from '../core/session-persistence.js'
@@ -74,7 +75,9 @@ export class TrackerRuntime {
   private readonly gate = new TrackerEventGate(this.lifecycle)
   private state: RuntimeState | null = null
   private bootstrapFailed = false
-  private pendingCollectionResume = false
+  private appShown = false
+  private intentCollection: boolean | undefined
+  private readonly pendingSessionCommands = new BootstrapBuffer()
   private hydration: Promise<void> | null = null
   private userKeyIgnoredWarned = false
   private readonly autoTrackDispatcher = new AutoTrackDispatcher()
@@ -84,6 +87,8 @@ export class TrackerRuntime {
   public registerPlugins(...plugins: Parameters<TrackerLifecycle['registerPlugins']>): boolean {
     return this.lifecycle.registerPlugins(...plugins)
   }
+
+  public registeredPluginNames(): readonly string[] { return this.lifecycle.registeredPlugins().map((plugin) => plugin.name) }
 
   public init(options: unknown): boolean {
     this.log('info', '[GrowingIO]：Gio uni-app SDK 初始化中...')
@@ -123,7 +128,7 @@ export class TrackerRuntime {
   }
 
   public track(eventName: unknown, properties?: unknown): boolean {
-    return this.gate.submit({ kind: 'track', payload: { eventName, properties } }, (intent) => this.emit(intent))
+    return this.submitAttributes('track', properties, eventName)
   }
 
   public autoTrack(call: AutoTrackCall, nativeEvent?: unknown): boolean {
@@ -148,15 +153,24 @@ export class TrackerRuntime {
   }
 
   public setUserAttributes(properties: unknown): boolean {
-    if (this.state === null || !this.collecting()) return false
-    const result = this.state.dispatcher.setUserAttributes(properties)
-    this.persistAfterEvent()
-    return result
+    return this.submitAttributes('user-attributes', properties)
+  }
+
+  private submitAttributes(kind: 'track' | 'user-attributes', properties: unknown, eventName?: unknown): boolean {
+    if (this.lifecycle.config()?.dataCollect !== true) return false
+    try {
+      // 在 JSON 快照之前统一属性语义；关闭采集时不能读取业务属性。
+      const attributes = Object.fromEntries(normalizeAttributes(properties).attributes)
+      return this.gate.submit({ kind, payload: { eventName, properties: attributes } }, (intent) => this.emit(intent))
+    } catch { return false }
   }
 
   public setUserId(userId: unknown, userKey?: unknown): boolean {
-    const state = this.state
     const config = this.lifecycle.config()
+    if (config === null || !updateIdentity({ deviceId: 'pending', userId: null, userKey: null }, userId, userKey, config.idMapping).ok) return false
+    const deferred = this.deferStateCommand('user-id', { userId, userKey })
+    if (deferred !== null) return deferred
+    const state = this.state
     if (state === null || config === null) return false
     const previous = state.identity.value
     const update = updateIdentity(previous, userId, userKey, config.idMapping)
@@ -166,6 +180,8 @@ export class TrackerRuntime {
       this.log('warn', '[GrowingIO]: userKey ignored because idMapping is disabled')
     }
     if (!this.updateIdentity(update.identity)) return false
+    // 首次显示之前只保存身份，不能为早期 A→B 创建无入口的 VISIT 或使用历史会话。
+    if (!this.appShown) return true
     const transition = state.sessions.onUserIdChange(previous.userId, update.identity.userId)
     if (transition.snapshot !== null) void state.sessionPersistence.persist(transition.snapshot)
     if (transition.startedNew) state.app.onUserChanged()
@@ -180,13 +196,8 @@ export class TrackerRuntime {
   public setDataCollect(value: unknown): boolean {
     const transition = this.lifecycle.setDataCollect(value)
     if (!transition.ok) return false
-    if (!transition.sessionRenewalRequired) return transition.changed
-    if (this.state === null) {
-      this.pendingCollectionResume = true
-      return true
-    }
-    this.resumeCollection()
-    return true
+    if (!transition.sessionRenewalRequired) return true
+    return this.submitLifecycle('collection-resume', {})
   }
 
   /** Only collection consent is mutable after initialization; all init-time options stay fixed. */
@@ -197,10 +208,15 @@ export class TrackerRuntime {
   }
 
   public setLocation(latitude: unknown, longitude: unknown): boolean {
+    if (!new LocationState().set(latitude, longitude)) return false
+    const deferred = this.deferStateCommand('location', { latitude, longitude })
+    if (deferred !== null) return deferred
     return this.state?.location.set(latitude, longitude) ?? false
   }
 
   public clearLocation(): boolean {
+    const deferred = this.deferStateCommand('clear-location', {})
+    if (deferred !== null) return deferred
     if (this.state === null) return false
     this.state.location.clear()
     return true
@@ -234,6 +250,10 @@ export class TrackerRuntime {
     return this.submitLifecycle('page-unload', { instanceId })
   }
 
+  public onPageTitleChanged(instanceId: string, title: string): boolean {
+    return this.submitLifecycle('page-title', { instanceId, title })
+  }
+
   private async hydrate(config: NonNullable<ReturnType<TrackerLifecycle['config']>>): Promise<void> {
     const keys = storageKeys(config.dataSourceId)
     const queue = new EventQueue()
@@ -258,6 +278,10 @@ export class TrackerRuntime {
     const sequence = new EventSequence(hydrated.state.meta.snapshot.eventSequenceId)
     const location = new LocationState()
     const identity = { value: hydrated.state.identity.identity }
+    if (!config.idMapping && identity.value.userKey !== null) {
+      identity.value = { ...identity.value, userKey: null }
+      await identityPersistence.persist(identity.value)
+    }
     let networkState: NetworkState = hydrated.state.systemContext.networkState
     const composer = new EventComposer(
       config, hydrated.state.systemContext, () => identity.value, sessions, sequence, queue,
@@ -275,6 +299,7 @@ export class TrackerRuntime {
       (drop) => this.log('warn', `[GrowingIO]: upload dropped (${drop.reason})`),
       () => { void queuePersistence.persist(queue) },
       (events) => this.debugEvents(events),
+      () => this.dependencies.network?.isConnected() !== false,
     )
     const appWithFlush = new AppLifecycle({
       sessions, composer, clock: this.dependencies.clock, canCollect: () => this.collecting(), currentPage: () => pages.current(),
@@ -282,9 +307,9 @@ export class TrackerRuntime {
       forceFlush: () => { if (uploader !== null) void uploader.forceFlush() },
     })
     const updateNetwork = (next: NetworkState): void => {
-      const previous = networkState
       networkState = next
-      if (previous === 'UNKNOWN' && next !== 'UNKNOWN') uploader?.flush()
+      // cellular/unknown 也可能明确联网；由独立连接状态决定能否恢复上传。
+      uploader?.flush()
     }
     const stopNetwork = this.dependencies.network === undefined ? null : this.dependencies.network.subscribe(updateNetwork)
     if (this.dependencies.network !== undefined) {
@@ -297,14 +322,10 @@ export class TrackerRuntime {
     }
     this.log('success', '[GrowingIO]：Gio uni-app SDK 初始化完成！')
     this.gate.release((intent) => this.emit(intent))
-    if (this.pendingCollectionResume) {
-      this.pendingCollectionResume = false
-      this.resumeCollection()
-    }
   }
 
   private collecting(): boolean {
-    return this.lifecycle.config()?.dataCollect === true
+    return this.lifecycle.config()?.dataCollect === true && this.intentCollection !== false
   }
 
   private systemContext(config: ResolvedGioConfig): SystemContextPort {
@@ -318,20 +339,56 @@ export class TrackerRuntime {
   }
 
   private emit(intent: TrackerIntent): boolean {
+    const previous = this.intentCollection
+    this.intentCollection = intent.collecting
+    try { return this.emitIntent(intent) } finally { this.intentCollection = previous }
+  }
+
+  private deferStateCommand(kind: string, payload: Readonly<Record<string, unknown>>): boolean | null {
+    if (this.state === null) return this.submitLifecycle(kind, payload)
+    // 首个等待会话的事件之后，状态修改也需要保序，防止事件串用后续身份或位置。
+    if (!this.appShown && this.pendingSessionCommands.size() > 0) {
+      return this.pendingSessionCommands.push({ kind, payload, collecting: this.intentCollection ?? this.lifecycle.config()?.dataCollect })
+    }
+    return null
+  }
+
+  private emitIntent(intent: TrackerIntent): boolean {
     const state = this.state
     if (state === null) return false
     const payload = record(intent.payload)
     if (payload === null) return false
+    if (intent.kind === 'track' || intent.kind === 'user-attributes') {
+      if (!this.collecting()) return false
+      // 恢复出的历史会话不能承接本次启动的业务事件，等待首次真实 App.onShow。
+      if (!this.appShown) return this.pendingSessionCommands.push(intent)
+    }
     const shownBefore = state.pages.current()
     let emitted = false
     let lifecycleHandled = false
     switch (intent.kind) {
+      case 'user-id': return this.setUserId(payload.userId, payload.userKey)
+      case 'location': return this.setLocation(payload.latitude, payload.longitude)
+      case 'clear-location': return this.clearLocation()
+      case 'user-attributes': emitted = state.dispatcher.setUserAttributes(payload.properties); break
+      case 'collection-resume':
+        if (this.appShown && this.collecting()) this.resumeCollection()
+        return true
       case 'track': emitted = state.dispatcher.track({ eventName: payload.eventName, properties: payload.properties }); break
       case 'autotrack': emitted = state.dispatcher.autoTrack(payload as NormalizedAutoTrackCall); break
       case 'app-launch': state.app.onLaunch(payload as AppEntrySnapshot); emitted = true; lifecycleHandled = true; break
-      case 'app-show': emitted = state.app.onShow(payload as AppEntrySnapshot).visitQueued; lifecycleHandled = true; break
+      case 'app-show':
+        emitted = state.app.onShow(payload as AppEntrySnapshot).visitQueued
+        this.appShown = true
+        lifecycleHandled = true
+        for (const command of this.pendingSessionCommands.drain()) this.emit(command as TrackerIntent)
+        break
       case 'app-hide': emitted = state.app.onHide().appClosedQueued; lifecycleHandled = true; break
       case 'page-load': emitted = state.page.onLoad(payload as PageLoadInput) !== null; lifecycleHandled = true; break
+      case 'page-title':
+        if (typeof payload.instanceId !== 'string' || typeof payload.title !== 'string') return false
+        state.pages.setTitle(payload.instanceId, payload.title)
+        return true
       case 'page-show': emitted = typeof payload.instanceId === 'string' && (typeof payload.title === 'string' || payload.title === null)
         ? state.page.onShow(payload.instanceId, payload.title).pageQueued : false; lifecycleHandled = typeof payload.instanceId === 'string' && (typeof payload.title === 'string' || payload.title === null); break
       case 'page-hide': if (typeof payload.instanceId === 'string') { state.page.onHide(payload.instanceId); emitted = true; lifecycleHandled = true }; break

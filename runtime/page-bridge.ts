@@ -7,6 +7,7 @@ export interface PageLifecycleTarget {
   onPageShow(instanceId: string, title: string | null): boolean
   onPageHide(instanceId: string): boolean
   onPageUnload(instanceId: string): boolean
+  onPageTitleChanged?(instanceId: string, title: string): boolean
   autoTrack?(call: AutoTrackCall): boolean
 }
 
@@ -43,9 +44,11 @@ export function createPageLifecycleBridge(target: PageLifecycleTarget, instanceI
   onHide: () => boolean
   onUnload: () => boolean
   onTabItemTap: (options: unknown) => boolean
+  onTitleChanged: (title: string) => void
 }> {
   const stableInstanceId = typeof instanceId === 'string' && instanceId.length > 0 ? instanceId : ''
   return {
+    onTitleChanged: (title) => { target.onPageTitleChanged?.(stableInstanceId, title) },
     onLoad: (route, query, referralPage = null) => {
       const normalizedRoute = routeSnapshot(route)
       if (stableInstanceId === '' || normalizedRoute === null) return false
