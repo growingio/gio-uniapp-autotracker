@@ -22,10 +22,7 @@ jobs:
           cache: pnpm
       - run: npm install --global npm@11.5.1
       - run: pnpm install --frozen-lockfile
-      - run: pnpm run check
       - run: pnpm run release:prepare
-      - run: pnpm run release:check
-      - run: pnpm exec tsc --noEmit -p test/type/tsconfig.compiled-consumer.json && pnpm exec tsx scripts/check-demo.ts
       - name: 保存已验证交付包，供失败重跑时核对
         uses: actions/upload-artifact@v4
         with:
@@ -48,3 +45,13 @@ jobs:
             gh release create "$RELEASE_TAG" --verify-tag --generate-notes "${flags[@]}"
           fi
           gh release upload "$RELEASE_TAG" dist/release/*.tgz dist/release/release.json --clobber
+      - name: 保存发布前代码测试报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk-test-${{ github.ref_name }}
+          path: |
+            coverage/
+            test-results/
+          retention-days: 14
+          overwrite: true

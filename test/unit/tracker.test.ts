@@ -350,7 +350,10 @@ describe('TrackerRuntime', () => {
 
   it('warns once when a userKey is ignored because idMapping is disabled', async () => {
     const warnings: string[] = []
-    const { tracker } = createTracker(true, false, false, { warn: (message) => warnings.push(message) })
+    const { tracker } = createTracker(true, false, false, {
+      info: () => undefined, success: () => undefined, error: () => undefined, debug: () => undefined,
+      warn: (message) => { warnings.push(message) },
+    })
     await tracker.whenReady()
     expect(tracker.setUserId('user-a', 'key-a')).toBe(true)
     expect(tracker.setUserId('user-b', 'key-b')).toBe(true)

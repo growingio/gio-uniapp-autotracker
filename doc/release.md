@@ -35,14 +35,12 @@ Vue/Babel 解析器只存在于编译侧 `vite-runtime.js`，随包携带；App 
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm run check
 pnpm run release:prepare
-pnpm run release:check
-pnpm exec tsc --noEmit -p test/type/tsconfig.compiled-consumer.json
-pnpm exec tsx scripts/check-demo.ts
 ```
 
-以上命令不会发布 npm 或创建 Git 标签。`build:sdk` 只构建与同步 demo；`release:prepare` 额外生成压缩包；`release:check` 检查摘要并在仓库外执行真实压缩包的安装、类型、SDK 运行时和 Vite 转换验证，同时通过 Vite 5 真正加载两渠道的 CommonJS 异步配置与 ESM 静态配置。
+以上命令不会发布 npm 或创建 Git 标签。`release:prepare` 先执行类型检查、全部代码测试和逐文件覆盖率门槛，再构建 SDK、生成压缩包并自动执行 `release:check`；任一步失败立即停止。单独运行代码测试使用 `pnpm run test:release`，完整功能矩阵及报告见[核心代码测试](./testing.md)。
+
+`build:sdk` 用于开发时构建与同步 demo；`release:check` 可复检已有交付包，检查摘要并在仓库外执行真实压缩包的安装、类型、SDK 运行时和 Vite 转换验证，同时通过 Vite 5 真正加载两渠道的 CommonJS 异步配置与 ESM 静态配置，最后检查 demo 消费者类型和编译结构。
 
 | 输出 | 内容 |
 |---|---|
@@ -53,7 +51,7 @@ pnpm exec tsx scripts/check-demo.ts
 | `dist/release/gio-uniapp-autotracker-版本-uni_modules.tgz` | 含 uni_modules 顶层目录的附件 |
 | `dist/release/release.json` | 包版本、渠道、文件名、npm SHA-512 integrity 与模块 SHA-256 |
 
-生成目录可以重复构建，会清除旧文件，不提交 Git。发布校验记录源码、锁文件、构建脚本及实际文件摘要；修改源码或产物后必须重新构建，不能只改元数据继续发布。两个渠道都包含 LICENSE 与第三方许可说明。
+生成目录可以重复构建，会清除旧文件，不提交 Git。发布校验记录源码、测试、测试配置、工作流、锁文件、构建脚本及实际文件摘要；修改这些输入或产物后必须重新构建，不能只改元数据继续发布。两个渠道都包含 LICENSE 与第三方许可说明。
 
 ## 版本与自动发布
 
@@ -65,7 +63,7 @@ pnpm exec tsx scripts/check-demo.ts
 | `1.1.0-beta.1` | `v1.1.0-beta.1` | `next` | 预发布 |
 | `1.1.0-rc.1` | `v1.1.0-rc.1` | `next` | 预发布 |
 
-`.github/workflows/publish.yml` 监听 `v*` 标签。流程为锁定依赖安装、测试、构建、压缩包消费者验证、保存 Actions 构件、发布 npm、创建 GitHub Release 并上传同一批压缩包与摘要。标签与包版本不一致时停止；仓库根仍保持 `private: true`，发布脚本只发布验证过的压缩包。
+`.github/workflows/test.yml` 在分支推送和 PR 上运行完整打包前检查。`.github/workflows/publish.yml` 监听 `v*` 标签，依次执行锁定依赖安装、代码测试及覆盖率、构建、压缩包消费者验证、保存 Actions 构件、发布 npm、创建 GitHub Release 并上传同一批压缩包与摘要。`release:publish` 自身也先执行代码测试和已有交付包检查。标签与包版本不一致时停止；仓库根仍保持 `private: true`，发布脚本只发布验证过的压缩包。
 
 完成三端验收和发布身份准备后，再修改版本、提交变更并推送对应标签。当前不会自动替你创建或推送标签。工作流触发即授权其发布该标签对应版本，因此不要用正式标签试跑流程。
 

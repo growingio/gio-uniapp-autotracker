@@ -9,6 +9,7 @@
 - [传统 uni-app 无埋点方案](./doc/uniapp-autotrack-design.md)：模板事件标识、插桩、隐私、去重和验收口径。
 - [安装与发布](./doc/release.md)：npm、uni_modules 接入、版本渠道和自动发布配置。
 - [开发计划](./doc/development-plan.md)：按依赖顺序拆分的实施、验证与发布门槛。
+- [核心代码测试](./doc/testing.md)：全部核心功能的测试矩阵、覆盖率门槛与打包发布前验收。
 
 仓库根目录就是 SDK 包根目录。`uni_modules/gio-uniapp-autotracker` 仅是使用方工程或发布压缩包中的安装位置，不在本仓库内再嵌套一层。
 
@@ -97,6 +98,8 @@ schema v2 与旧编译探针互不兼容，升级时必须整体重新构建 App
 
 ## 发布目录
 
-执行 `pnpm run release:prepare && pnpm run release:check`，同一次构建生成 `dist/npm` 和 `dist/uni_modules/gio-uniapp-autotracker`，最终压缩包及摘要在 `dist/release`。`demo/uni_modules` 同步使用生成产物；这些目录均不提交 Git。
+执行 `pnpm run test:release` 可运行项目级类型检查、全部自动化测试和逐文件覆盖率检查。执行 `pnpm run release:prepare` 会先通过这些代码检查，再构建、打包并验证交付包；任一步失败立即停止。功能覆盖矩阵及报告位置见[核心代码测试](./doc/testing.md)。
+
+同一次构建生成 `dist/npm` 和 `dist/uni_modules/gio-uniapp-autotracker`，最终压缩包及摘要在 `dist/release`。`demo/uni_modules` 同步使用生成产物；这些目录均不提交 Git。`release:check` 可单独复检已有交付包，`release:publish` 在发布前会再次执行代码测试及交付包检查。
 
 推送与 `package.json.version` 一致的 `v版本号` 标签会触发 GitHub Actions：检查、构建、独立安装验证、npm 发布和 GitHub Release 附件上传。正式版走 `latest`，预发布走 `next` 并标记 GitHub prerelease。DCloud 插件市场暂不上架。首次发布前需完成 npm 所有权及 Trusted Publisher 配置，操作流程见[安装与发布](./doc/release.md)。
