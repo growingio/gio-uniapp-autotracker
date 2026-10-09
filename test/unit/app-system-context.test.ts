@@ -5,6 +5,33 @@ import { AppSystemContextPort } from '../../platform/app-system-context.js'
 describe('AppSystemContextPort', () => {
   afterEach(() => vi.unstubAllGlobals())
 
+  it('uses modern system devicePixelRatio when device info omits it and legacy pixelRatio is absent', async () => {
+    const port = new AppSystemContextPort({
+      getDeviceInfo: () => ({ platform: 'harmonyos' }),
+      getSystemInfoSync: () => ({ screenWidth: 390, screenHeight: 844, devicePixelRatio: 3 }),
+      getAppBaseInfo: () => ({}),
+    }, '0.1.0', null)
+    await expect(port.load()).resolves.toMatchObject({ screenWidth: 1170, screenHeight: 2532 })
+  })
+
+  it.each(['android', 'ios', 'harmonyos'])('reports physical pixels for %s and keeps Android tablet classification in logical pixels', async (platform) => {
+    const port = new AppSystemContextPort({
+      getDeviceInfo: () => ({ platform, devicePixelRatio: 3, deviceType: 'phone' }),
+      getSystemInfoSync: () => ({ screenWidth: 390, screenHeight: 844, pixelRatio: 3 }),
+      getAppBaseInfo: () => ({}),
+    }, '0.1.0', null)
+    await expect(port.load()).resolves.toMatchObject({ screenWidth: 1170, screenHeight: 2532, deviceType: 'PHONE' })
+  })
+
+  it('rounds scaled dimensions, normalizes orientation and falls back to a valid system pixel ratio', async () => {
+    const port = new AppSystemContextPort({
+      getDeviceInfo: () => ({ platform: 'android', devicePixelRatio: Number.NaN }),
+      getSystemInfoSync: () => ({ screenWidth: 853, screenHeight: 393, pixelRatio: 2.75 }),
+      getAppBaseInfo: () => ({}),
+    }, '0.1.0', null)
+    await expect(port.load()).resolves.toMatchObject({ screenWidth: 1081, screenHeight: 2346, deviceType: 'PHONE' })
+  })
+
   it.each(['android', 'ios', 'harmonyos'])('使用 %s 的真实版本和宿主包字段，不能把引擎版本当应用版本', async (platform) => {
     const port = new AppSystemContextPort({
       getDeviceInfo: () => ({ platform, osVersion: '18.1', platformVersion: 'incorrect' }),

@@ -53,6 +53,10 @@ function dimension(value: unknown): number | null {
   return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : null
 }
 
+function pixelRatio(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null
+}
+
 function language(value: unknown): string {
   const source = text(value)
   if (source === '') return 'und'
@@ -84,6 +88,9 @@ export class AppSystemContextPort implements SystemContextPort {
     if (targetPlatform === null) throw new Error('unsupported_platform')
     const width = dimension(device.screenWidth) ?? dimension(system.screenWidth) ?? 0
     const height = dimension(device.screenHeight) ?? dimension(system.screenHeight) ?? 0
+    const ratio = pixelRatio(device.devicePixelRatio) ?? pixelRatio(system.devicePixelRatio) ?? pixelRatio(system.pixelRatio) ?? 1
+    const physicalWidth = Math.round(width * ratio)
+    const physicalHeight = Math.round(height * ratio)
     const domain = (targetPlatform === 'iOS' ? text(app.bundleId) : targetPlatform === 'Android' ? text(app.packageName) : text(app.bundleName ?? app.packageName)) || text(app.hostPackageName ?? system.hostPackageName) || nativeDomain(targetPlatform)
     return {
       platform: targetPlatform,
@@ -92,8 +99,8 @@ export class AppSystemContextPort implements SystemContextPort {
       appState: 'FOREGROUND',
       appName: text(app.appName),
       networkState: 'UNKNOWN',
-      screenWidth: width === 0 || height === 0 ? 0 : Math.min(width, height),
-      screenHeight: width === 0 || height === 0 ? 0 : Math.max(width, height),
+      screenWidth: width === 0 || height === 0 ? 0 : Math.min(physicalWidth, physicalHeight),
+      screenHeight: width === 0 || height === 0 ? 0 : Math.max(physicalWidth, physicalHeight),
       deviceBrand: text(device.deviceBrand ?? device.brand ?? system.deviceBrand ?? system.brand, 'UNKNOWN'),
       deviceModel: text(device.deviceModel ?? device.model ?? system.deviceModel ?? system.model, 'UNKNOWN'),
       deviceType: targetPlatform === 'Android' ? androidDeviceType(Math.min(width, height)) : deviceType(device.deviceType),
