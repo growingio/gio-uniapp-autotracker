@@ -1,10 +1,94 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { normalizeInitOptions } from '../../core/config.js'
+import { createAppTracker } from '../../platform/app-runtime.js'
 
 const required = { accountId: ' account ', dataSourceId: ' source ' }
 
 describe('normalizeInitOptions', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it.each([
+    ['HTTPS://Collector.Example.com:443/', 'https://collector.example.com'],
+    ['http://localhost:80', 'http://localhost'],
+    ['collector.example.com:8443', 'https://collector.example.com:8443'],
+    ['http://192.168.1.2:8080/', 'http://192.168.1.2:8080'],
+    ['https://[2001:db8::1]:443/', 'https://[2001:db8::1]'],
+    ['http://[::1]:8080', 'http://[::1]:8080'],
+    ['https://收集.example', 'https://xn--wbv461i.example'],
+    ['https://BÜCHER.example', 'https://xn--bcher-kva.example'],
+    ['https://例え。テスト', 'https://xn--r8jz45g.xn--zckzah'],
+    ['https://ｃｏｌｌｅｃｔｏｒ.example', 'https://collector.example'],
+    ['http://127.1', 'http://127.0.0.1'],
+    ['http://0x7f.0.0.1', 'http://127.0.0.1'],
+    ['http://0177.0.0.1', 'http://127.0.0.1'],
+    ['http://2130706433', 'http://127.0.0.1'],
+    ['http://192.168.1.2.', 'http://192.168.1.2'],
+    ['https://[::ffff:192.168.1.2]', 'https://[::ffff:192.168.1.2]'],
+    ['http://0x', 'http://0.0.0.0'],
+    ['https://faß.de', 'https://xn--fa-hia.de'],
+    ['https://ΟΣ.example', 'https://xn--0xai.example'],
+    ['https://e\u0301.example', 'https://xn--9ca.example'],
+  ])('accepts App collector %s when the host has no global URL', (serverUrl, expected) => {
+    vi.stubGlobal('URL', undefined)
+    expect(normalizeInitOptions({ ...required, serverUrl })).toMatchObject({
+      ok: true, config: { serverUrl: expected },
+    })
+  })
+
+  it.each([
+    'https://user:pass@collector.example.com', 'https://collector.example.com#x',
+    'https://collector.example.com?x', 'https://collector.example.com//',
+    'https://collector.example.com:65536', 'https://collector.example.com:abc',
+    'https://collector.example.com\\evil', 'https://[1:2:3]', 'https://[1::2::3]',
+    'https://[gg::1]', 'https://[::ffff:999.1.1.1]',
+    'https://999.1.1.1', 'https://1.2.3.4.5', 'https://4294967296',
+    'https://1.2.3.256', 'https://09', 'https://foo.1',
+    'https://0xffffffffffffffffffff', 'https://1..2',
+    'https://[::ffff:192.168.001.1]', 'https://[::ffff:1.2.3]',
+    'https://\u0301example.com', 'https://\ud800.example',
+    `https://${'中'.repeat(64)}.example`, `https://${'中a'.repeat(30)}.example`,
+  ])('rejects invalid App collector %s without global URL', (serverUrl) => {
+    vi.stubGlobal('URL', undefined)
+    expect(normalizeInitOptions({ ...required, serverUrl })).toStrictEqual({ ok: false, code: 'invalid_server_url' })
+  })
+
+  it.each(['https://收集.example', 'https://faß.de', 'https://ΟΣ.example', 'https://collector.example:', 'https://%63ollector.example'])('preserves the host URL implementation for legal origin %s', (serverUrl) => {
+    const expected = new URL(serverUrl).origin
+    expect(normalizeInitOptions({ ...required, serverUrl })).toMatchObject({ ok: true, config: { serverUrl: expected } })
+  })
+
+  it('does not let a failing host URL implementation fall back to weaker validation', () => {
+    vi.stubGlobal('URL', class { constructor() { throw new Error('invalid') } })
+    expect(normalizeInitOptions({ ...required, serverUrl: 'https://collector.example' })).toStrictEqual({ ok: false, code: 'invalid_server_url' })
+  })
+
+  it('rejects session durations whose millisecond conversion overflows', () => {
+    expect(normalizeInitOptions({ ...required, sessionExpires: Number.MAX_VALUE })).toStrictEqual({ ok: false, code: 'invalid_session_expires' })
+  })
+  it.each(['\ud800', '\udc00', 'a\ud800b', '\ud83d\ude00\udc00'])('rejects unpaired UTF-16 in mandatory identifiers: %s', (value) => {
+    expect(normalizeInitOptions({ ...required, accountId: value })).toStrictEqual({ ok: false, code: 'invalid_account_id' })
+    expect(normalizeInitOptions({ ...required, dataSourceId: value })).toStrictEqual({ ok: false, code: 'invalid_data_source_id' })
+  })
+
+  it('preserves Chinese and paired supplementary characters in mandatory identifiers', () => {
+    const result = normalizeInitOptions({ accountId: ' 中文😀 ', dataSourceId: ' 来源🚀 ' })
+    expect(result).toMatchObject({ ok: true, config: { accountId: '中文😀', dataSourceId: '来源🚀' } })
+    if (result.ok) expect(() => encodeURIComponent(result.config.accountId)).not.toThrow()
+  })
+
+  it.each(['accountId', 'dataSourceId'])('rejects malformed %s before reading or writing App ports', async (field) => {
+    const access = vi.fn()
+    const tracker = createAppTracker({
+      getStorageSync: access, setStorageSync: access, removeStorageSync: access,
+      getDeviceInfo: access, getSystemInfoSync: access, getAppBaseInfo: access,
+      getNetworkType: access, request: access,
+    }, { sdkVersion: '0.1.0', deviceIdFactory: () => 'device', sessionIdFactory: () => 'session' })
+    expect(tracker.init({ ...required, [field]: '\ud800' })).toBe(false)
+    expect(await tracker.whenReady()).toBe(false)
+    expect(access).not.toHaveBeenCalled()
+    expect(normalizeInitOptions({ ...required, [field]: '修正😀' })).toMatchObject({ ok: true })
+  })
   it('normalizes every App-owned option once and drops appId', () => {
     expect(
       normalizeInitOptions({

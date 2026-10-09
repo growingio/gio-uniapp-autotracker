@@ -1,3 +1,5 @@
+import { normalizeCollectorHost } from './collector-host.js'
+
 export type GioInitOptions = Readonly<{
   accountId: string
   dataSourceId: string
@@ -52,6 +54,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function nonEmptyString(value: unknown): string | null {
   if (typeof value !== 'string') return null
   const trimmed = value.trim()
+  // A string iterator keeps valid surrogate pairs together. Lone surrogates
+  // would throw later in URI/UTF-8 encoding, after initialization has started.
+  for (const character of trimmed) {
+    const point = character.codePointAt(0)!
+    if (point >= 0xD800 && point <= 0xDFFF) return null
+  }
   return trimmed === '' ? null : trimmed
 }
 
@@ -65,26 +73,26 @@ function normalizeServerUrl(value: unknown): string | ConfigErrorCode {
   if (value === undefined || value === null) return DEFAULT_SERVER_URL
   if (typeof value !== 'string' || value.trim() === '') return 'invalid_server_url'
 
+  // App service runtimes do not provide the browser's URL constructor. Parse
+  // only collector origins: no credentials, paths, query, fragments or escapes.
   const candidate = value.trim().includes('://') ? value.trim() : `https://${value.trim()}`
-  let url: URL
-  try {
-    url = new URL(candidate)
-  } catch {
-    return 'invalid_server_url'
+  if (typeof globalThis.URL === 'function') {
+    try {
+      const url = new globalThis.URL(candidate)
+      if ((url.protocol !== 'http:' && url.protocol !== 'https:') || url.hostname === '' || url.pathname !== '/'
+        || url.search !== '' || url.hash !== '' || url.username !== '' || url.password !== '') return 'invalid_server_url'
+      return url.origin
+    } catch { return 'invalid_server_url' }
   }
-
-  if (
-    (url.protocol !== 'http:' && url.protocol !== 'https:') ||
-    url.hostname === '' ||
-    url.pathname !== '/' ||
-    url.search !== '' ||
-    url.hash !== '' ||
-    url.username !== '' ||
-    url.password !== ''
-  ) {
-    return 'invalid_server_url'
-  }
-  return url.origin
+  const match = /^(https?):\/\/(\[[a-f\d:.]+\]|[^\s/:?#@\[\]\\%]+)(?::(\d+))?\/?$/i.exec(candidate)
+  if (match === null) return 'invalid_server_url'
+  const protocol = match[1]!.toLowerCase()
+  const host = normalizeCollectorHost(match[2]!)
+  if (host === null) return 'invalid_server_url'
+  const port = match[3] === undefined ? null : Number(match[3])
+  if (port !== null && (!Number.isInteger(port) || port > 65535)) return 'invalid_server_url'
+  const suffix = port === null || (protocol === 'https' && port === 443) || (protocol === 'http' && port === 80) ? '' : `:${port}`
+  return `${protocol}://${host}${suffix}`
 }
 
 function normalizeBoolean(value: unknown, fallback: boolean, error: ConfigErrorCode): boolean | ConfigErrorCode {
@@ -95,7 +103,9 @@ function normalizeBoolean(value: unknown, fallback: boolean, error: ConfigErrorC
 function normalizeSessionPolicy(value: unknown): SessionPolicy | ConfigErrorCode {
   if (value === undefined) return { timeoutMs: APP_DEFAULT_SESSION_TIMEOUT_MS }
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return 'invalid_session_expires'
-  return { timeoutMs: value * 60_000 }
+  const timeoutMs = value * 60_000
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return 'invalid_session_expires'
+  return { timeoutMs }
 }
 
 /**
