@@ -15,7 +15,7 @@ function optionalScalar(value: unknown): boolean { return value == null || scala
 function text(value: unknown): string | null {
   return scalar(value) ? String(value).replace(/[\u0000-\u001F\u007F]/g, ' ').trim().slice(0, 100) : null
 }
-export function enabledMarker(value: unknown): boolean { return value === true || value === '' || value === 'true' }
+export function enabledMarker(value: unknown): boolean { return value === true || value === '' || value === 'true' || value === 1 || value === '1' }
 function ownValue(value: Readonly<Record<string, unknown>>, key: string): unknown {
   const field = Object.getOwnPropertyDescriptor(value, key)
   return field !== undefined && 'value' in field ? field.value : undefined

@@ -52,6 +52,8 @@ describe('无埋点不得改变 Vue listener 的业务语义', () => {
 
   it.each([
     'save', 'actions.save', 'save($event)', 'actions.save($event)',
+    'e => (save(e))', 'e => ({ saved: save(e) })', '(e) => ((save(e)))',
+    '(e => (actions.save(e)))', 'e => (save(e) /* inside expression */)',
     '(first, second) => save(first, second)', 'function(first, second) { return save(first, second) }',
     'ready() ? save : cancel', 'ready() ? save($event) : cancel($event)',
     'ready() ? e => save(e) : e => cancel(e)', 'count++',
@@ -75,8 +77,8 @@ describe('无埋点不得改变 Vue listener 的业务语义', () => {
 
   it('业务抛出的异常保持原对象，采集失败不能阻断业务', () => {
     const failure = new Error('业务异常')
-    for (const instrument of [false, true]) {
-      const fixture = mountAutoTrackSfc(`<script setup>import { save } from 'fixture'</script><template><button @click="save($event)" /></template>`,
+    for (const handler of ['save($event)', 'e => (save(e))', 'e => ({ saved: save(e) })']) for (const instrument of [false, true]) {
+      const fixture = mountAutoTrackSfc(`<script setup>import { save } from 'fixture'</script><template><button @click="${handler}" /></template>`,
         () => { throw new Error('采集异常') }, { fixture: { save: () => { throw failure } } }, instrument)
       let caught: unknown
       try { fixture.fire(0, 'onClick', {}) } catch (error) { caught = error }

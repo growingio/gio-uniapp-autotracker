@@ -117,10 +117,14 @@ export function rewriteHandler(source: string, nativeName: string, _dispatcher: 
     if (checked === null || body?.start == null || body.end == null || parameter?.type !== 'Identifier') return null
     const capture = probe(checked.name, String(parameter.name))
     // 保留原函数的参数、this、arguments、求值位置和返回行为，只插入失败隔离的探针。
-    const start = body.start + (body.type === 'BlockStatement' ? 1 : 0)
+    // Babel 的表达式节点范围不含外围括号；箭头整体终点才包含这些括号及内部注释。
+    const extra = typeof body.extra === 'object' && body.extra !== null ? body.extra as Record<string, unknown> : null
+    const start = body.type === 'BlockStatement' ? body.start + 1
+      : typeof extra?.parenStart === 'number' ? extra.parenStart : body.start
+    const end = root.end ?? body.end
     const code = body.type === 'BlockStatement'
       ? `${source.slice(0, start)}${capture}${source.slice(start)}`
-      : `${source.slice(0, start)}{${capture}return (${source.slice(start, body.end)})}${source.slice(body.end)}`
+      : `${source.slice(0, start)}{${capture}return (${source.slice(start, end)})}${source.slice(end)}`
     return { code, fallback: checked.fallback }
   }
   if (root.type === 'ConditionalExpression') {

@@ -33,9 +33,9 @@ describe('schema v2 normalization', () => {
     })).toStrictEqual({ kind: 'click', xpath: '#submitOrder', textValue: 'live', index: 2, hyperlink: '/new' })
   })
   it.each(['currentTarget', 'target'])('rejects ignore and sensitive markers on %s without reading any change value', (target) => {
-    for (const marker of ['growingIgnore', 'growingSensitive']) {
+    for (const marker of ['growingIgnore', 'growingSensitive', 'growing-ignore', 'growing-sensitive']) for (const value of [true, '', 'true', 1, '1']) {
       const read = vi.fn(() => { throw new Error('secret') })
-      const event = { [target]: { dataset: { [marker]: true, growingTrack: true } }, get detail() { return read() } }
+      const event = { [target]: { dataset: { [marker]: value, growingTrack: true }, get value() { return read() } }, get detail() { return read() } }
       expect(normalizeAutoTrackCall(change, event)).toBeNull()
       expect(read).not.toHaveBeenCalled()
     }
@@ -46,10 +46,23 @@ describe('schema v2 normalization', () => {
     expect(read).not.toHaveBeenCalled()
   })
   it('rejects static sensitivity before reading probe metadata and isolates throwing host accessors', () => {
-    const read = vi.fn()
-    expect(normalizeAutoTrackCall({ ...change, sensitive: true, get textValue() { return read() } })).toBeNull()
-    expect(read).not.toHaveBeenCalled()
+    for (const marker of ['ignored', 'sensitive']) for (const value of [true, '', 'true', 1, '1']) {
+      const read = vi.fn(() => 'secret')
+      const probe = { ...change, [marker]: value, get textValue() { return read() }, get pickerRange() { return read() } }
+      expect(normalizeAutoTrackCall(probe, { get detail() { return read() } })).toBeNull()
+      expect(read).not.toHaveBeenCalled()
+    }
     expect(normalizeAutoTrackCall(click, { get currentTarget() { throw new Error('host') } })).toBeNull()
+  })
+  it.each([false, 0, '0', 'false', null, undefined])('does not enable privacy or input consent for false marker %s', (marker) => {
+    const read = vi.fn(() => ({ value: 'secret' }))
+    expect(normalizeAutoTrackCall({ ...change, ignored: marker, sensitive: marker, trackValue: marker }, { get detail() { return read() } }))
+      .toStrictEqual({ kind: 'change', xpath: '#submitOrder', textValue: null })
+    expect(read).not.toHaveBeenCalled()
+  })
+  it.each([1, '1'])('accepts numeric input consent %s from probe or native dataset', (marker) => {
+    expect(normalizeAutoTrackCall({ ...change, trackValue: marker }, { detail: { value: 'consented' } })?.textValue).toBe('consented')
+    expect(normalizeAutoTrackCall({ ...change, trackValue: false }, { currentTarget: { dataset: { growingTrack: marker } }, detail: { value: 'consented' } })?.textValue).toBe('consented')
   })
   it('does not read unauthorized change data or let false runtime consent fall back to a true template marker', () => {
     const read = vi.fn()

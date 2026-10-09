@@ -31,6 +31,7 @@ describe('schema v2 Vue instrumentation', () => {
   })
   it.each([
     ['save($event)', 'save'], ['actions.save($event)', 'actions.save'],
+    ['e => (save(e))', 'save'], ['(e) => ((save(e)))', 'save'],
     ['(event) => save(event)', 'save'], ['function(event) { return save(event) }', 'save'], ['(event) => 42', 'click'], ['count++', 'click'],
   ])('derives the readable name for %s and preserves return values and native arguments', (handler, eventName) => {
     const calls = vi.fn()
