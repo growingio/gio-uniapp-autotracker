@@ -61,3 +61,42 @@ C05 会缩小自动采集范围：`@click="save"`、`ready ? save : cancel` 等�
 - 首次修复验证时，Android adb 与 HarmonyOS hdc 均未发现连接设备，iOS simctl 因 CoreSimulator 可执行组件缺失而不可用。本次没有设备交互或真实服务端收数验证。
 - V01 保持未完成，生产能力表继续关闭待验收的无埋点功能；当前生成的包用于审查和验收，不应宣称三端生产验收已完成。
 - 首次外部发布前还需确认 npm 包所有权 / Trusted Publisher、目标 GitHub 工作流配置。脚本和受控回归通过不等于 npm 已经发布成功。
+
+## 独立 SDK 对照后的修复与再复审（2026-10-09）
+
+本节记录当前工作树的修复，上述测试数量和端侧结果是此前的历史记录。本轮对照本地 Android、iOS、HarmonyOS、小程序、Web 和 uni-app x SDK，先为已确认缺陷增加失败回归，再修复并交叉复审；保留用户已有的文档、demo 配置与 uniMP 设计改动。
+
+### 上一轮八项问题
+
+| 编号 | 触发条件与原问题 | 修复及回归 |
+|---|---|---|
+| U01 | 箭头 handler 的表达式体有括号、返回对象或多层括号时，插桩留下外围括号，Vue 编译失败。 | `autotrack/vite-handler.ts` 按完整表达式体范围替换；原始和插桩后 listener 对照编译及执行，保留参数、this、返回值和异常。 |
+| U02 | App 服务运行环境没有全局 `URL` 时，有效显式 serverUrl 被误拒绝，无法初始化。 | `core/config.ts` 在宿主有 URL 时保留原校验；缺失时使用无 Node/DOM 依赖的 HTTP(S) origin 解析。覆盖域名、端口、IPv4、IPv6和中文等常用 IDN，仍拒绝凭据、接口路径、query、fragment及非法地址。真实 App 装配回归验证显式 collector 能发送。 |
+| U03 | PAGE 和 shownAt 分别取时，或恢复采集补 PAGE 时沿用旧 shownAt，导致 CUSTOM/VIEW 关联到错误页面显示时间。 | `runtime/page-lifecycle.ts` 与 `core/event-composer.ts` 共用 PAGE 构建时刻；同意恢复刷新当前页 shownAt，关联字段与新 PAGE 一致。 |
+| U04 | ignore/sensitive 为 `1` 或 `"1"` 时未生效，私密值会被读取。 | `runtime/autotrack-normalize.ts` 统一兼容数字/字符串标记；覆盖探针、currentTarget/target 与 kebab/camel 数据键，验证拒绝发生在 detail、文本与选项 getter 读取之前。 |
+| U05 | 离线启动且网络监听缺失或注册失败，状态永远停在离线，恢复网络后无法上传。 | `runtime/tracker.ts` 返回前台时主动重查，查询重入去重；两类降级宿主均验证离线事件持久化并在返回前台后补发。该降级路径按前台生命周期重查，不进行无限后台轮询。 |
+| U06 | A 退出后登录 B 被当作首次匿名登录，沿用 A 的 session。 | `core/identity.ts` 加密持久化最近非空身份并兼容旧记录；`core/session.ts` 按最近身份判断换人。覆盖 A→退出→A/B、冷启动恢复、后台切换以及首屏之前不提前发 VISIT。 |
+| U07 | 将逻辑屏幕尺寸直接上报，DPR=3 的 390×844 被报成 390×844。 | `platform/app-system-context.ts` 以 device/system 的现代 devicePixelRatio 或兼容 pixelRatio 转成物理像素并四舍五入；横竖屏统一短/长边，Android 平板分类仍用逻辑尺寸。三端与实际 App 装配覆盖 1170×2532 等字段。 |
+| U08 | 普通事件每条立即发送，没有实现文档的 20 条/5 秒聚合，造成大量小请求。 | `core/uploader.ts` 从首条待发事件开启固定等待窗口，20 条立即发送，后台/重连强制发送，完成旧请求不提前发送后续小批量；100 条高频事件验证为 5 个 20 条请求。原并发和重试预算继续保留。 |
+
+### 第二轮新发现并修复的八项问题
+
+| 编号 | 可复现问题 | 修复及回归 |
+|---|---|---|
+| U09 | 有限但极大的 sessionExpires 换算成毫秒后为 Infinity，会话失去超时边界。 | `core/config.ts` 检查换算结果，非法值原子拒绝；Number.MAX_VALUE 回归。 |
+| U10 | 超时/取消调用 abort 后，宿主同步回调先结算，覆盖权威 timeout/aborted 结果。 | `core/transport-finalizer.ts` 先锁定结果，再 abort；两类同步回调均仅结算一次。 |
+| U11 | 网络查询已同步完成但 Promise 回调未执行时收到新断网通知，随后旧 WIFI 结果覆盖新状态。 | `runtime/tracker.ts` 为通知和查询完成回调增加 revision 优先级保护；实际 App 装配复现此间隙，后续事件维持 UNKNOWN 与离线暂停。 |
+| U12 | userId/userKey 密文解码失败与合法 null 混同，损坏记录被错误恢复为匿名身份。 | `core/identity.ts` 区分合法 null 与解码失败，损坏字段拒绝恢复；deviceId、userId、userKey、lastUserId 均有损坏记录回归。 |
+| U13 | 未配对 UTF-16 身份通过校验，先改变内存，再在加密时抛错，留下半更新状态。 | `core/identity.ts` 在任何状态修改前拒绝非法代理字符；身份参数和 runtime 原子性回归，旧身份保持不变。 |
+| U14 | 身份接受非空空白字符串，而 session 用 trim 判断匿名，换人结果与公开身份契约不一致。 | `core/session.ts` 与身份统一以空字符串判断退出；覆盖空白身份与其他身份切换。 |
+| U15 | 初始化恢复较慢时缓存 show→hide→show，回放时全用同一当前时间，真实超过 30 秒的后台间隔被压成 0。 | `core/tracker-event-gate.ts`、`runtime/tracker.ts` 和 `runtime/app-lifecycle.ts` 保存 show/hide 观察时刻，仅用于会话间隔；报文仍按构建时取时。覆盖 ≤30000ms 和 >30000ms 两侧。 |
+| U16 | 未配对 UTF-16 的 accountId/dataSourceId 通过初始化校验，随后在请求路径编码或身份 codec 阶段抛错，阻断上传或初始化恢复。 | `core/config.ts` 在必填 ID 边界拒绝非法代理字符；分别返回对应配置错误，保留合法中文/emoji。实际 App 装配回归确认非法配置不读取或写入任何宿主端口。 |
+
+### 验证口径
+
+- 交叉复审覆盖身份/生命周期与上传/插桩两组，额外 19 个合法函数写法通过原始/插桩 Vue 编译对照。
+- 完整门禁入口为 `pnpm run release:prepare`：类型、全套测试、逐文件覆盖率、SDK 构建、npm/uni_modules 压缩包、仓库外安装和消费者验证；生成结果位于 `coverage/`、`test-results/` 与 `dist/`。
+- 全套 57 个测试文件、541 项测试通过（此前基线为 435 项），逐文件覆盖率门槛均通过。交付包消费者同时验证无 URL 的显式 collector 初始化、普通事件聚合与后台立即发送。
+- 无 URL 的 IDN 降级按 RFC 3492 编码常用域名，未引入大型 Unicode 映射表，也不声称完整实现 UTS #46；有 URL 的宿主继续使用原生完整校验，原生拒绝输入后不会绕过校验降级。
+- 本次 HBuilderX 5.24 的运行态检查将 demo 识别为 Web，导入后仍返回“暂不支持”，因此未进行新的 App 编译、签名、真机或生产 collector 验收。生产无埋点能力表保持既有验收状态。
+- 未提交、推送、打标签或发布。

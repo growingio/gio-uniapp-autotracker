@@ -6,6 +6,7 @@
 
 - [全端 Measurement Protocol](./doc/measurement-protocol.md)：唯一的事件字段与端间口径来源。
 - [SDK 架构设计](./doc/uniapp-sdk-development.md)：目录、模块边界、依赖方向和运行时数据链。
+- [uni 小程序与原生宿主打通设计](./doc/unimp-native-hybrid-design.md)：含 [module 详细契约](./doc/unimp-native-bridge-contract.md) 和 [设计自审](./doc/unimp-native-hybrid-review.md)，覆盖运行模式、消息与恢复规则、实施验收及 uni-app x 扩展；尚未实现。
 - [传统 uni-app 无埋点方案](./doc/uniapp-autotrack-design.md)：模板事件标识、插桩、隐私、去重和验收口径。
 - [安装与发布](./doc/release.md)：npm、uni_modules 接入、版本渠道和自动发布配置。
 - [开发计划](./doc/development-plan.md)：按依赖顺序拆分的实施、验证与发布门槛。
