@@ -44,11 +44,22 @@ globalThis.uni = {
   request: options => { requests.push(JSON.parse(options.data)); options.success({ statusCode: 204 }); }
 };
 let tracker;
+const hostURL = globalThis.URL; globalThis.URL = undefined;
 assert.equal(gdp('registerPlugins', [{ name: 'consumer-check', install: value => { tracker = value } }]), true);
-assert.equal(gdp('init', 'account', 'source', { uniVue: { mixin: value => hooks.push(value) }, sdkVersion: 'caller-override' }), true);
+assert.equal(gdp('init', 'account', 'source', { uniVue: { mixin: value => hooks.push(value) }, serverUrl: 'collector.example/', sdkVersion: 'caller-override' }), true);
 assert.equal(gdp('setUserId', 'early-user'), true);
 hooks[0].onLaunch.call({}, { path: 'pages/home' }); hooks[0].onShow.call({}, { path: 'pages/home' });
 assert.equal(await tracker.whenReady(), true);
+globalThis.URL = hostURL;
+assert.equal(requests.length, 0);
+const waiting = tracker.queuedEvents();
+assert.equal(waiting[0].sdkVersion, ${JSON.stringify(metadata.version)});
+assert.equal(waiting[0].userId, 'early-user');
+hooks[0].onHide.call({});
+assert.equal(requests.length, 1);
+assert.deepEqual(requests.flat().slice(0, -1), waiting);
+assert.equal(requests.flat().at(-1).eventType, 'APP_CLOSED');
+assert.deepEqual(tracker.queuedEvents(), []);
 assert.equal(requests.flat()[0].sdkVersion, ${JSON.stringify(metadata.version)});
 assert.equal(requests.flat()[0].userId, 'early-user');
 const call = { kind: 'click' }; let forwarded;

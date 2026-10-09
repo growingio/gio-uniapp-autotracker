@@ -47,6 +47,36 @@ function createTracker(dataCollect = true, autoTracking = false, debug = false, 
 }
 
 describe('TrackerRuntime', () => {
+  it.each([[30_200, false], [30_201, true]] as const)('uses observed background duration while hydration is pending: show=%i renewed=%s', async (returnAt, renewed) => {
+    let now = 100
+    let complete: (context: AppSystemContext) => void = () => { throw new Error('hydration_not_started') }
+    let sessionNumber = 0
+    const tracker = new TrackerRuntime({
+      storage: new MemoryStorage(), systemContext: { load: () => new Promise(resolve => { complete = resolve }) },
+      clock: { now: () => now }, timezone: { getOffsetMinutes: () => 0 }, deviceIdFactory: () => 'device',
+      sessionIdFactory: () => `session-${++sessionNumber}`, orientation: () => 'PORTRAIT',
+    })
+    tracker.init({ accountId: 'account', dataSourceId: 'source' })
+    tracker.onAppLaunch({ path: '/home', query: '' })
+    tracker.onAppShow({ path: '/home', query: '' })
+    tracker.onPageLoad({ instanceId: 'home', route: 'pages/home', query: '', referralPage: null })
+    now = 101
+    tracker.onPageShow('home', 'Home')
+    now = 200
+    tracker.onAppHide()
+    now = returnAt
+    tracker.onAppShow({ path: '/home', query: '' })
+    now = 50_000
+    complete(system)
+    await tracker.whenReady()
+    expect(tracker.queuedEvents()).toMatchObject([
+      { eventType: 'VISIT', timestamp: 50_000, sessionId: 'session-1' },
+      { eventType: 'PAGE', timestamp: 50_000, sessionId: 'session-1' },
+      { eventType: 'APP_CLOSED', timestamp: 50_000, sessionId: 'session-1' },
+      ...(renewed ? [{ eventType: 'VISIT', timestamp: 50_000, sessionId: 'session-2' }] : []),
+    ])
+    expect(tracker.queuedEvents()).toHaveLength(renewed ? 4 : 3)
+  })
   it('50 条启动业务调用不会挤掉 App 和首屏生命周期', async () => {
     const { tracker } = createTracker()
     for (let i = 0; i < 50; i++) expect(tracker.track(`early_${i}`)).toBe(true)
@@ -161,6 +191,7 @@ describe('TrackerRuntime', () => {
     expect(tracker.init({ accountId: 'account', dataSourceId: 'source', dataCollect: true, debug: true })).toBe(true)
     tracker.onAppShow({ path: '/home', query: '' })
     await tracker.whenReady()
+    tracker.onAppHide()
     expect(logs).toContain('info:[GrowingIO]：Gio uni-app SDK 初始化中...')
     expect(logs).toContain('success:[GrowingIO]：Gio uni-app SDK 初始化完成！')
     expect(logs).toContain('debug:App: onShow 100')
@@ -260,7 +291,89 @@ describe('TrackerRuntime', () => {
     ])
   })
 
-  it('starts the optional uploader after an event is queued and lets accepted batches leave the queue', async () => {
+  it('renews the visit after logout and login as another user, while same-user login preserves it', async () => {
+    const { tracker } = createTracker()
+    tracker.onAppShow({ path: '/home', query: '' })
+    await tracker.whenReady()
+    tracker.setUserId('A')
+    tracker.track('as_a')
+    tracker.clearUserId()
+    tracker.setUserId('A')
+    tracker.clearUserId()
+    tracker.setUserId('B')
+    tracker.track('as_b')
+    expect(tracker.queuedEvents().map(event => [event.eventType, event.userId, event.sessionId])).toEqual([
+      ['VISIT', undefined, 'session-1'], ['CUSTOM', 'A', 'session-1'],
+      ['VISIT', 'B', 'session-2'], ['CUSTOM', 'B', 'session-2'],
+    ])
+  })
+
+  it('rejects malformed Unicode login input without throwing or changing active identity', async () => {
+    const { tracker } = createTracker()
+    tracker.onAppShow({ path: '/home', query: '' })
+    await tracker.whenReady()
+    tracker.setUserId('A')
+    expect(() => tracker.setUserId('\ud800')).not.toThrow()
+    expect(tracker.setUserId('\ud800')).toBe(false)
+    expect(tracker.setUserId('B', '\udc00')).toBe(false)
+    tracker.track('after_bad_identity')
+    expect(tracker.queuedEvents().at(-1)).toMatchObject({ userId: 'A', sessionId: 'session-1' })
+  })
+
+  it('preserves the latest user across logout and cold start without exposing it on anonymous events', async () => {
+    const storage = new MemoryStorage()
+    let sessionNumber = 0
+    const create = () => new TrackerRuntime({
+      storage, systemContext: { load: async () => system }, clock: { now: () => 100 }, timezone: { getOffsetMinutes: () => 0 },
+      deviceIdFactory: () => 'device', sessionIdFactory: () => `session-${++sessionNumber}`, orientation: () => 'PORTRAIT',
+    })
+    const first = create()
+    first.init({ accountId: 'account', dataSourceId: 'source' })
+    first.onAppLaunch({ path: '/home', query: '' })
+    first.onAppShow({ path: '/home', query: '' })
+    await first.whenReady()
+    first.setUserId('private-user-a')
+    first.clearUserId()
+    const stored = await storage.read('state', storageKeys('source').identity)
+    expect(stored.kind === 'value' && stored.value.includes('private-user-a')).toBe(false)
+
+    const second = create()
+    second.init({ accountId: 'account', dataSourceId: 'source' })
+    second.onAppLaunch({ path: '/home', query: '' })
+    second.onAppShow({ path: '/home', query: '' })
+    await second.whenReady()
+    second.track('anonymous_after_restart')
+    second.setUserId('B')
+    second.track('as_b')
+    const events = second.queuedEvents()
+    expect(events.find(event => event.eventName === 'anonymous_after_restart')).toMatchObject({ sessionId: 'session-2' })
+    expect(events.find(event => event.eventName === 'anonymous_after_restart')).not.toHaveProperty('userId')
+    expect(events.find(event => event.eventName === 'as_b')).toMatchObject({ sessionId: 'session-3', userId: 'B' })
+    expect(events.filter(event => event.sessionId === 'session-3')).toMatchObject([{ eventType: 'VISIT', userId: 'B' }, { eventType: 'CUSTOM', userId: 'B' }])
+    expect(events.every(event => !Object.prototype.hasOwnProperty.call(event, 'lastUserId'))).toBe(true)
+  })
+
+  it('uses the replayed PAGE time for CUSTOM and VIEW events after consent resumes', async () => {
+    const { tracker, setNow } = createTracker(true, true)
+    tracker.onAppShow({ path: '/home', query: '' })
+    tracker.onPageLoad({ instanceId: 'home', route: 'pages/home', query: '', referralPage: null })
+    tracker.onPageShow('home', 'Home')
+    await tracker.whenReady()
+    tracker.setDataCollect(false)
+    setNow(200)
+    tracker.setDataCollect(true)
+    tracker.track('after_consent')
+    tracker.autoTrack({ schemaVersion: 2, source: 'template', kind: 'click', eventName: 'click' })
+    tracker.autoTrack({ schemaVersion: 2, source: 'template', kind: 'change', eventName: 'change', elementType: 'input' })
+    expect(tracker.queuedEvents().slice(-5)).toMatchObject([
+      { eventType: 'VISIT', sessionId: 'session-2' }, { eventType: 'PAGE', timestamp: 200, sessionId: 'session-2' },
+      { eventType: 'CUSTOM', pageShowTimestamp: 200, sessionId: 'session-2' },
+      { eventType: 'VIEW_CLICK', pageShowTimestamp: 200, sessionId: 'session-2' },
+      { eventType: 'VIEW_CHANGE', pageShowTimestamp: 200, sessionId: 'session-2' },
+    ])
+  })
+
+  it('starts the optional uploader on background flush and lets accepted batches leave the queue', async () => {
     const requests: string[] = []
     const transport: TransportPort = {
       dispatch: (request, done) => {
@@ -281,6 +394,7 @@ describe('TrackerRuntime', () => {
     tracker.init({ accountId: 'account', dataSourceId: 'source' })
     tracker.onAppShow({ path: '/home', query: '' })
     await tracker.whenReady()
+    tracker.onAppHide()
 
     expect(requests).toStrictEqual(['https://napi.growingio.com/v3/projects/account/collect?stm=123&compress=0'])
     expect(tracker.queuedEvents()).toStrictEqual([])

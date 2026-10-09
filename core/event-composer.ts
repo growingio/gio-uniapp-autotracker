@@ -11,6 +11,8 @@ export type EventComposeInput = Readonly<{
   eventType: AppEventType
   /** Event-specific protocol fields. Common fields always come from the trusted runtime context. */
   fields?: Readonly<Record<string, unknown>>
+  /** Captured by a trusted lifecycle router so its event and context share one timestamp. */
+  timestamp?: number
   appState?: AppSystemContext['appState']
 }>
 
@@ -59,7 +61,7 @@ export class EventComposer {
 
     let timestamp: number
     try {
-      timestamp = this.clock.now()
+      timestamp = input.timestamp ?? this.clock.now()
     } catch {
       return { ok: false, code: 'invalid_timestamp' }
     }

@@ -35,6 +35,77 @@ function runtime(): { value: UploaderRuntime; fireDelay: (delay: number) => void
 }
 
 describe('Uploader', () => {
+  it('普通事件满 20 条才发送，未满时在首条等待 5 秒后发送', () => {
+    const queue = new EventQueue()
+    const clocks = runtime()
+    const sent: Array<readonly ProtocolEvent[]> = []
+    const uploader = new Uploader(queue, { dispatch: (request, done) => {
+      sent.push(JSON.parse(request.body) as ProtocolEvent[])
+      done({ kind: 'success', status: 204 })
+    } }, clocks.value, 'https://collector.example', 'account')
+    for (let index = 1; index < 20; index++) { queue.enqueue(event(index)); uploader.schedule() }
+    expect(sent).toEqual([])
+    expect(clocks.scheduledDelays()).toEqual([5_000])
+    queue.enqueue(event(20))
+    uploader.schedule()
+    expect(sent.map(batch => batch.length)).toEqual([20])
+    expect(clocks.scheduledDelays()).toEqual([])
+    queue.enqueue(event(21))
+    uploader.schedule()
+    clocks.fireDelay(5_000)
+    expect(sent.map(batch => batch.length)).toEqual([20, 1])
+    expect(queue.snapshot()).toEqual([])
+  })
+
+  it('已有请求完成不会绕过后续普通事件的聚合窗口', () => {
+    const queue = new EventQueue()
+    const clocks = runtime()
+    const callbacks: Array<(result: TransportResult) => void> = []
+    const sent: Array<readonly ProtocolEvent[]> = []
+    const uploader = new Uploader(queue, { dispatch: (request, done) => {
+      sent.push(JSON.parse(request.body) as ProtocolEvent[])
+      callbacks.push(done)
+    } }, clocks.value, 'https://collector.example', 'account')
+    for (let index = 1; index <= 20; index++) queue.enqueue(event(index))
+    uploader.schedule()
+    queue.enqueue(event(21))
+    uploader.schedule()
+    callbacks[0]!({ kind: 'success', status: 204 })
+    expect(sent.map(batch => batch.length)).toEqual([20])
+    clocks.fireDelay(5_000)
+    expect(sent.map(batch => batch.length)).toEqual([20, 1])
+  })
+
+  it('高频 100 条普通事件聚合为 5 个请求，而不是每条事件一请求', () => {
+    const queue = new EventQueue()
+    const sent: Array<readonly ProtocolEvent[]> = []
+    const uploader = new Uploader(queue, { dispatch: (request, done) => {
+      sent.push(JSON.parse(request.body) as ProtocolEvent[])
+      done({ kind: 'success', status: 204 })
+    } }, runtime().value, 'https://collector.example', 'account')
+    for (let index = 1; index <= 100; index++) { queue.enqueue(event(index)); uploader.schedule() }
+    expect(sent.map(batch => batch.length)).toEqual([20, 20, 20, 20, 20])
+    expect(sent.flat().map(value => value.eventSequenceId)).toEqual(Array.from({ length: 100 }, (_, index) => index + 1))
+  })
+
+  it('后台强制发送取消普通等待，后续重试按到期时间发送', async () => {
+    const queue = new EventQueue()
+    const clocks = runtime()
+    const callbacks: Array<(result: TransportResult) => void> = []
+    const uploader = new Uploader(queue, { dispatch: (_request, done) => { callbacks.push(done) } }, clocks.value, 'https://collector.example', 'account')
+    queue.enqueue(event(1))
+    uploader.schedule()
+    const forced = uploader.forceFlush()
+    expect(callbacks).toHaveLength(1)
+    // The 5-second transport deadline remains, while the ordinary aggregation timer is canceled.
+    expect(clocks.scheduledDelays()).toEqual([5_000, 1_000])
+    callbacks[0]!({ kind: 'network' })
+    clocks.fireDelay(800)
+    expect(callbacks).toHaveLength(2)
+    callbacks[1]!({ kind: 'success', status: 204 })
+    await expect(forced).resolves.toBe(true)
+  })
+
   it('请求构建失败时释放队列并报告原因，不占用上传槽位', async () => {
     const queue = new EventQueue()
     queue.enqueue(event(1))

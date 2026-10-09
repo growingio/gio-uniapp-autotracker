@@ -21,20 +21,22 @@ export function dispatchWithFinalizer(
   let handle: TransportHandle | void
   let timeoutHandle: unknown
 
-  const settle = (result: TransportResult): void => {
+  const settle = (result: TransportResult, abort = false): void => {
     if (settled) return
     settled = true
     timer.clearTimeout(timeoutHandle)
+    if (abort) {
+      try {
+        handle?.abort?.()
+      } catch {
+        // The authoritative result was locked before invoking host code.
+      }
+    }
     done(result)
   }
 
   timeoutHandle = timer.setTimeout(() => {
-    try {
-      handle?.abort?.()
-    } catch {
-      // The timeout result is still authoritative when a host abort throws.
-    }
-    settle({ kind: 'timeout' })
+    settle({ kind: 'timeout' }, true)
   }, request.timeoutMs)
 
   try {
@@ -44,13 +46,6 @@ export function dispatchWithFinalizer(
   }
 
   return {
-    cancel: () => {
-      try {
-        handle?.abort?.()
-      } catch {
-        // Cancellation is best effort; it still completes once as aborted.
-      }
-      settle({ kind: 'aborted' })
-    },
+    cancel: () => { settle({ kind: 'aborted' }, true) },
   }
 }

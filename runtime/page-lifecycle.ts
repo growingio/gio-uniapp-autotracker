@@ -39,14 +39,16 @@ export class PageLifecycle {
 
   /** Used after dataCollect false → true, after the lifecycle router has emitted its replacement VISIT. */
   public replayCurrentPage(): boolean {
-    const page = this.dependencies.pages.current()
+    if (!this.dependencies.canCollect() || this.dependencies.pages.current() === null) return false
+    const page = this.dependencies.pages.refreshCurrentShownAt(this.dependencies.clock.now())
     return page !== null && this.emitPage(page)
   }
 
   private emitPage(page: PageSnapshot): boolean {
-    if (!this.dependencies.canCollect()) return false
+    if (!this.dependencies.canCollect() || page.shownAt === null) return false
     return this.dependencies.composer.compose({
       eventType: 'PAGE',
+      timestamp: page.shownAt,
       fields: {
         path: page.route,
         query: page.query,

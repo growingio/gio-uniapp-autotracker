@@ -19,6 +19,15 @@ function fakeTimer(): { timer: TimerPort; fire: () => void; cleared: () => boole
 }
 
 describe('dispatchWithFinalizer', () => {
+  it.each(['cancel', 'timeout'] as const)('%s 结果先锁定，宿主 abort 的同步回调不能抢占完成结果', (action) => {
+    const fake = fakeTimer()
+    const results: TransportResult[] = []
+    const finalized = dispatchWithFinalizer({ dispatch: (_request, done) => ({ abort: () => done({ kind: 'network', message: 'request:fail abort' }) }) }, fake.timer, request, result => results.push(result))
+    if (action === 'cancel') finalized.cancel()
+    else fake.fire()
+    expect(results).toEqual([{ kind: action === 'cancel' ? 'aborted' : 'timeout' }])
+  })
+
   it.each(['cancel', 'timeout'] as const)('%s 时宿主 abort 抛错仍只结算一次，迟到回调无效', (action) => {
     const fake = fakeTimer()
     const results: TransportResult[] = []

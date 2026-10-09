@@ -90,6 +90,9 @@ describe('SFC to mock collector pipeline', () => {
       fixture.fire(3, 'onChange', { currentTarget: { id: 'banner' }, detail: { current: 1, source: 'autoplay' } })
       fixture.fire(1, 'onClick', { currentTarget: { dataset: { src: '/docs' } } })
       createPageLifecycleBridge(tracker, 'home#1').onTabItemTap({ index: 0, text: 'Home', pagePath: 'pages/home/index' })
+      // This end-to-end test validates the documented immediate background flush;
+      // the ordinary aggregation window is exercised with controlled timers separately.
+      expect(tracker.onAppHide()).toBe(true)
       await expect.poll(() => received.filter((event) => event.eventType === 'VIEW_CLICK' || event.eventType === 'VIEW_CHANGE').length).toBe(10)
       const views = received.filter((event) => event.eventType === 'VIEW_CLICK' || event.eventType === 'VIEW_CHANGE')
       expect(views).toEqual(expect.arrayContaining([

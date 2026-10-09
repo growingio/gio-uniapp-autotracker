@@ -54,12 +54,13 @@ export class AppLifecycle {
     this.coldStartPending = true
   }
 
-  public onShow(entry: AppEntrySnapshot): AppShowResult {
+  public onShow(entry: AppEntrySnapshot, observedAt?: number): AppShowResult {
+    const timestamp = observedAt ?? this.dependencies.clock.now()
     this.dependencies.composer.setAppState('FOREGROUND')
     this.currentEntry = normalizeEntry(entry)
     const session = this.coldStartPending
       ? this.dependencies.sessions.onProcessLaunch()
-      : this.dependencies.sessions.resume(this.dependencies.clock.now())
+      : this.dependencies.sessions.resume(timestamp)
     this.coldStartPending = false
     this.persistSession(session.snapshot)
     const visitQueued = session.startedNew && this.dependencies.canCollect()
@@ -86,9 +87,10 @@ export class AppLifecycle {
   }
 
   /** Best effort only: persistence and flush failures cannot block the host entering background. */
-  public onHide(): AppHideResult {
+  public onHide(observedAt?: number): AppHideResult {
+    const timestamp = observedAt ?? this.dependencies.clock.now()
     this.dependencies.composer.setAppState('BACKGROUND')
-    const session = this.dependencies.sessions.hide(this.dependencies.clock.now())
+    const session = this.dependencies.sessions.hide(timestamp)
     const page = this.dependencies.currentPage?.() ?? null
     const appClosedQueued = session !== null && this.dependencies.canCollect()
       ? this.dependencies.composer.compose({

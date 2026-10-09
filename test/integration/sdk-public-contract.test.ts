@@ -4,11 +4,12 @@ import type { AppRuntimeHost } from '../../platform/app-runtime.js'
 import type { TrackerRuntime } from '../../runtime/tracker.js'
 
 beforeEach(() => {
+  vi.useFakeTimers()
   vi.resetModules()
   vi.stubGlobal('gdp', undefined)
   for (const method of ['info', 'warn', 'error', 'log'] as const) vi.spyOn(console, method).mockImplementation(() => undefined)
 })
-afterEach(() => { vi.unstubAllGlobals() })
+afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals() })
 
 async function sdk(platform = 'android') {
   const values = new Map<string, string>()
@@ -54,27 +55,32 @@ describe('SDK 公共命令与完整核心链路', () => {
       expect(received).toEqual([])
 
       expect(gdp('setOptions', { dataCollect: true })).toBe(true)
+      expect(received).toEqual([])
+      await vi.advanceTimersByTimeAsync(5_000)
       expect(received.map(event => event.eventType)).toEqual(['VISIT', 'PAGE'])
       expect(gdp('setUserId', 'user-a', 'account-key')).toBe(true)
       expect(gdp('setUserAttributes', { plan: 'pro', active: false })).toBe(true)
       expect(gdp('setLocation', 30.2, 120.1)).toBe(true)
       expect(gdp('track', 'purchase', { price: 0, paid: false, tags: ['a', 'b'] })).toBe(true)
-      expect(received.at(-1)).toMatchObject({ platform: protocolPlatform, eventName: 'purchase', userId: 'user-a', userKey: 'account-key',
+      expect(tracker.queuedEvents().at(-1)).toMatchObject({ platform: protocolPlatform, eventName: 'purchase', userId: 'user-a', userKey: 'account-key',
         latitude: 30.2, longitude: 120.1, attributes: { price: '0', paid: 'false', tags: 'a||b' } })
       expect(gdp('setUserId', 'user-b', 'account-key')).toBe(true)
-      expect(received.at(-1)).toMatchObject({ eventType: 'VISIT', userId: 'user-b' })
+      expect(tracker.queuedEvents().at(-1)).toMatchObject({ eventType: 'VISIT', userId: 'user-b' })
       expect(gdp('clearUserId')).toBe(true)
       expect(gdp('clearLocation')).toBe(true)
       expect(gdp('track', 'anonymous')).toBe(true)
-      for (const field of ['userId', 'userKey', 'latitude', 'longitude']) expect(received.at(-1)).not.toHaveProperty(field)
+      for (const field of ['userId', 'userKey', 'latitude', 'longitude']) expect(tracker.queuedEvents().at(-1)).not.toHaveProperty(field)
 
       const { dispatchAutoTrack } = await import('../../autotrack.js')
       expect(dispatchAutoTrack({ schemaVersion: 2, source: 'template', kind: 'click', eventName: 'buy' }, { currentTarget: { id: 'buy' } })).toBe(true)
-      expect(received.at(-1)).toMatchObject({ eventType: 'VIEW_CLICK', xpath: 'buy#buy' })
+      expect(tracker.queuedEvents().at(-1)).toMatchObject({ eventType: 'VIEW_CLICK', xpath: 'buy#buy' })
       expect(dispatchAutoTrack({ schemaVersion: 2, source: 'template', kind: 'change', eventName: 'toggle', elementType: 'switch', trackValue: true },
         { currentTarget: { id: 'toggle' }, detail: { value: false } })).toBe(true)
-      expect(received.at(-1)).toMatchObject({ eventType: 'VIEW_CHANGE', xpath: 'toggle#toggle', textValue: 'false' })
+      expect(tracker.queuedEvents().at(-1)).toMatchObject({ eventType: 'VIEW_CHANGE', xpath: 'toggle#toggle', textValue: 'false' })
+      const waitingEvents = tracker.queuedEvents()
+      expect(received).toHaveLength(2)
       expect(tracker.onAppHide()).toBe(true)
+      expect(received.slice(2, -1)).toEqual(waitingEvents)
       expect(received.at(-1)).toMatchObject({ eventType: 'APP_CLOSED', appState: 'BACKGROUND' })
       expect(received.at(-1)).not.toHaveProperty('eventSequenceId')
       const sequence = received.flatMap(event => event.eventSequenceId === undefined ? [] : [event.eventSequenceId])

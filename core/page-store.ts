@@ -77,6 +77,15 @@ export class PageStore {
     return this.pages.get(this.currentInstanceId) ?? null
   }
 
+  /** A consent replay starts a new PAGE time without simulating navigation or changing its referral. */
+  public refreshCurrentShownAt(shownAt: number): PageSnapshot | null {
+    const page = this.current()
+    if (page === null || this.currentInstanceId === null || !Number.isFinite(shownAt) || shownAt < 0) return null
+    const refreshed = { ...page, shownAt }
+    this.pages.set(this.currentInstanceId, refreshed)
+    return refreshed
+  }
+
   private validLoadInput(input: PageLoadInput): boolean {
     return typeof input.instanceId === 'string' && input.instanceId.length > 0
       && typeof input.route === 'string' && input.route.length > 0

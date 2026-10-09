@@ -73,6 +73,25 @@ describe('SessionManager', () => {
     expect(session.onUserIdChange('A', 'B')).toMatchObject({ startedNew: true, reason: 'user_changed', snapshot: { sessionId: 'second' } })
   })
 
+  it('remembers the last logged-in user through logout and renews only for a different login', () => {
+    const session = new SessionManager({ timeoutMs: 30_000 }, ids('first', 'second'))
+    session.resume(1)
+    expect(session.onUserIdChange(null, 'A').startedNew).toBe(false)
+    expect(session.onUserIdChange('A', null).startedNew).toBe(false)
+    expect(session.onUserIdChange(null, 'A').startedNew).toBe(false)
+    session.onUserIdChange('A', null)
+    expect(session.onUserIdChange(null, 'B')).toMatchObject({ startedNew: true, reason: 'user_changed', snapshot: { sessionId: 'second' } })
+  })
+
+  it('compares accepted user IDs without trimming whitespace', () => {
+    const session = new SessionManager({ timeoutMs: 30_000 }, ids('first', 'second', 'third'))
+    session.resume(1)
+    session.onUserIdChange(null, 'A')
+    expect(session.onUserIdChange('A', ' ')).toMatchObject({ startedNew: true, snapshot: { sessionId: 'second' } })
+    session.onUserIdChange(' ', null)
+    expect(session.onUserIdChange(null, 'B')).toMatchObject({ startedNew: true, snapshot: { sessionId: 'third' } })
+  })
+
   it('always starts a new session when collection resumes', () => {
     const session = new SessionManager({ timeoutMs: 30_000 }, ids('fresh'))
     expect(session.onCollectionResumed()).toMatchObject({ startedNew: true, reason: 'collection_resumed', snapshot: { sessionId: 'fresh', lastCloseTime: null } })

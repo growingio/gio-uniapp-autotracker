@@ -19,24 +19,47 @@ const system: AppSystemContext = {
   deviceType: 'PHONE', appVersion: '1.0.0', language: 'zh-CN', sdkVersion: '0.1.0',
 }
 
-function createLifecycle(initialCollection = true) {
+function createLifecycle(initialCollection = true, tickingClock = false) {
   let now = 100
   let collect = initialCollection
   const sessions = new SessionManager(config.sessionPolicy, () => 'session-1')
   sessions.resume(0)
   const queue = new EventQueue()
+  const clock = { now: () => tickingClock ? now++ : now }
+  const pages = new PageStore()
   const lifecycle = new PageLifecycle({
-    pages: new PageStore(),
+    pages,
     composer: new EventComposer(
       config, system, () => ({ deviceId: 'device-1', userId: null, userKey: null }), sessions,
-      new EventSequence(), queue, { now: () => now }, { getOffsetMinutes: () => 0 }, new LocationState(),
+      new EventSequence(), queue, clock, { getOffsetMinutes: () => 0 }, new LocationState(),
     ),
-    clock: { now: () => now }, orientation: () => 'PORTRAIT', canCollect: () => collect,
+    clock, orientation: () => 'PORTRAIT', canCollect: () => collect,
   })
-  return { lifecycle, queue, setNow: (value: number) => { now = value }, setCollection: (value: boolean) => { collect = value } }
+  return { lifecycle, pages, queue, setNow: (value: number) => { now = value }, setCollection: (value: boolean) => { collect = value } }
 }
 
 describe('PageLifecycle', () => {
+  it('uses the captured shown time for PAGE even when separate clock reads cross a millisecond', () => {
+    const { lifecycle, queue } = createLifecycle(true, true)
+    lifecycle.onLoad({ instanceId: 'home', route: 'pages/home', query: '', referralPage: null })
+    const result = lifecycle.onShow('home', 'Home')
+    expect(result.page?.shownAt).toBe(100)
+    expect(queue.snapshot()[0]?.event.timestamp).toBe(result.page?.shownAt)
+  })
+
+  it('refreshes current shown time on consent replay without changing route, query, title or referral', () => {
+    const { lifecycle, pages, queue, setNow, setCollection } = createLifecycle(false, true)
+    lifecycle.onLoad({ instanceId: 'home', route: 'pages/home', query: 'id=1', referralPage: 'pages/entry' })
+    lifecycle.onShow('home', 'Home')
+    expect(pages.current()?.shownAt).toBe(100)
+    setNow(200)
+    expect(lifecycle.replayCurrentPage()).toBe(false)
+    expect(pages.current()?.shownAt).toBe(100)
+    setCollection(true)
+    expect(lifecycle.replayCurrentPage()).toBe(true)
+    expect(queue.snapshot()[0]?.event).toMatchObject({ timestamp: 200, path: 'pages/home', query: 'id=1', title: 'Home', referralPage: 'pages/entry' })
+    expect(pages.current()?.shownAt).toBe(200)
+  })
   it('freezes onLoad fields and emits PAGE for each true onShow with the refreshed title', () => {
     const { lifecycle, queue, setNow } = createLifecycle()
     lifecycle.onLoad({ instanceId: 'detail#1', route: 'pages/detail/index', query: 'id=42', referralPage: 'pages/home/index' })

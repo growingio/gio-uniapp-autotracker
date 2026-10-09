@@ -20,7 +20,7 @@ function validTimestamp(value: number): boolean {
 }
 
 function isLoggedIn(value: string | null | undefined): boolean {
-  return typeof value === 'string' && value.trim().length > 0
+  return typeof value === 'string' && value.length > 0
 }
 
 function createSession(idFactory: SessionIdFactory, reason: SessionStartReason): SessionTransition {
@@ -41,13 +41,16 @@ function createSession(idFactory: SessionIdFactory, reason: SessionStartReason):
  */
 export class SessionManager {
   private snapshot: SessionSnapshot | null
+  private lastUserId: string | null
 
   public constructor(
     private readonly policy: SessionPolicy,
     private readonly idFactory: SessionIdFactory,
     initialSnapshot: SessionSnapshot | null = null,
+    initialLastUserId: string | null = null,
   ) {
     this.snapshot = initialSnapshot
+    this.lastUserId = isLoggedIn(initialLastUserId) ? initialLastUserId : null
   }
 
   public current(): SessionSnapshot | null {
@@ -87,9 +90,12 @@ export class SessionManager {
     return this.snapshot
   }
 
-  /** Anonymous → A and A → empty preserve the session; A → B starts a new one. */
+  /** First login and logout preserve the session; a different login after logout still renews it. */
   public onUserIdChange(previousUserId: string | null | undefined, nextUserId: string | null | undefined): SessionTransition {
-    if (isLoggedIn(previousUserId) && isLoggedIn(nextUserId) && previousUserId !== nextUserId) {
+    const previous = isLoggedIn(previousUserId) ? previousUserId : this.lastUserId
+    if (isLoggedIn(nextUserId)) this.lastUserId = nextUserId ?? null
+    else if (isLoggedIn(previousUserId)) this.lastUserId = previousUserId ?? null
+    if (isLoggedIn(previous) && isLoggedIn(nextUserId) && previous !== nextUserId) {
       return this.replace(createSession(this.idFactory, 'user_changed'), true)
     }
     if (this.snapshot === null) return { snapshot: null, startedNew: false, reason: null }

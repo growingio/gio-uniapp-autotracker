@@ -6,6 +6,8 @@ import { EventQueue } from './queue.js'
 import { dispatchWithFinalizer, type TimerPort } from './transport-finalizer.js'
 
 export const MAX_CONCURRENT_UPLOADS = 3
+export const UPLOAD_BATCH_THRESHOLD = 20
+export const UPLOAD_INTERVAL_MS = 5_000
 const RETRY_DELAYS_MS = [800, 1_600] as const
 
 export interface UploaderRuntime extends TimerPort {
@@ -25,6 +27,10 @@ export class Uploader {
   private pendingRetries = 0
   private readonly readyRetries: Array<{ batch: readonly QueueEntry[]; attempt: number }> = []
   private flushing = false
+  private scheduled: unknown | null = null
+  /** Explicit flushes authorize only their existing events; later arrivals keep their own window. */
+  private readonly readyRequests = new Set<string>()
+  private readonly reservedRequests = new Set<string>()
   private readonly drainWaiters = new Set<() => void>()
 
   public constructor(
@@ -40,7 +46,33 @@ export class Uploader {
     private readonly canDispatch: () => boolean = () => true,
   ) {}
 
+  /** Normal event delivery coalesces from the first waiting event, without postponing its deadline. */
+  public schedule(): void {
+    const waiting = this.queue.snapshot().filter(entry => !this.reservedRequests.has(entry.requestId) && !this.readyRequests.has(entry.requestId))
+    if (waiting.length === 0) return
+    if (waiting.length >= UPLOAD_BATCH_THRESHOLD) {
+      this.flush()
+      return
+    }
+    if (this.scheduled !== null) return
+    this.scheduled = this.runtime.setTimeout(() => {
+      this.scheduled = null
+      this.flush()
+    }, UPLOAD_INTERVAL_MS)
+  }
+
   public flush(): void {
+    if (this.scheduled !== null) {
+      this.runtime.clearTimeout(this.scheduled)
+      this.scheduled = null
+    }
+    for (const entry of this.queue.snapshot()) {
+      if (!this.reservedRequests.has(entry.requestId)) this.readyRequests.add(entry.requestId)
+    }
+    this.drain()
+  }
+
+  private drain(): void {
     if (this.flushing) return
     this.flushing = true
     while (this.active < MAX_CONCURRENT_UPLOADS && this.canDispatch()) {
@@ -49,12 +81,19 @@ export class Uploader {
         this.dispatch(retry.batch, retry.attempt)
         continue
       }
-      const batch = this.queue.claimNextBatch()
+      const claimed = this.queue.claimNextBatch()
+      const batch = claimed.filter(entry => this.readyRequests.has(entry.requestId))
+      this.queue.release(claimed.filter(entry => !this.readyRequests.has(entry.requestId)).map(entry => entry.requestId))
       if (batch.length === 0) break
+      for (const entry of batch) {
+        this.readyRequests.delete(entry.requestId)
+        this.reservedRequests.add(entry.requestId)
+      }
       const attempt = batch[0]!.retryCount
       if (attempt > RETRY_DELAYS_MS.length) {
         const requestIds = batch.map((entry) => entry.requestId)
         this.queue.remove(requestIds)
+        this.releaseReserved(requestIds)
         this.onQueueChanged()
         this.onDrop({ requestIds, reason: 'retry_exhausted' })
         continue
@@ -98,6 +137,7 @@ export class Uploader {
     const requestIds = batch.map((entry) => entry.requestId)
     if (!requestResult.ok) {
       this.queue.remove(requestIds)
+      this.releaseReserved(requestIds)
       this.onQueueChanged()
       this.onDrop({ requestIds, reason: 'request_build_failed' })
       this.notifyDrain()
@@ -115,6 +155,7 @@ export class Uploader {
       this.active -= 1
       if (result.kind === 'success') {
         this.queue.remove(requestIds)
+        this.releaseReserved(requestIds)
         this.queue.release(requestIds)
         this.onQueueChanged()
       } else if ((result.kind === 'network' || result.kind === 'timeout') && !this.canDispatch()) {
@@ -127,10 +168,11 @@ export class Uploader {
         this.runtime.setTimeout(() => {
           this.pendingRetries -= 1
           this.readyRetries.push({ batch, attempt: attempt + 1 })
-          this.flush()
+          this.drain()
         }, this.retryDelay(attempt))
       } else {
         this.queue.remove(requestIds)
+        this.releaseReserved(requestIds)
         this.queue.release(requestIds)
         this.onQueueChanged()
         this.onDrop({
@@ -139,7 +181,7 @@ export class Uploader {
           result,
         })
       }
-      this.flush()
+      this.drain()
       this.notifyDrain()
     })
   }
@@ -147,6 +189,10 @@ export class Uploader {
   private retryDelay(attempt: number): number {
     const random = Math.min(1, Math.max(0, this.runtime.random()))
     return Math.round(RETRY_DELAYS_MS[attempt]! * (0.8 + random * 0.4))
+  }
+
+  private releaseReserved(requestIds: readonly string[]): void {
+    for (const requestId of requestIds) this.reservedRequests.delete(requestId)
   }
 
   private isDrained(): boolean {

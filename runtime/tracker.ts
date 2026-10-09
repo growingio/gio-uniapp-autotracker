@@ -60,6 +60,7 @@ type RuntimeState = Readonly<{
   autoTrackProfile: AppCapabilityProfile | null
   uploader: Uploader | null
   stopNetwork: (() => void) | null
+  refreshNetwork: () => void
 }>
 
 function record(value: unknown): Readonly<Record<string, unknown>> | null {
@@ -182,7 +183,7 @@ export class TrackerRuntime {
     if (!this.updateIdentity(update.identity)) return false
     // 首次显示之前只保存身份，不能为早期 A→B 创建无入口的 VISIT 或使用历史会话。
     if (!this.appShown) return true
-    const transition = state.sessions.onUserIdChange(previous.userId, update.identity.userId)
+    const transition = state.sessions.onUserIdChange(previous.userId ?? previous.lastUserId, update.identity.userId)
     if (transition.snapshot !== null) void state.sessionPersistence.persist(transition.snapshot)
     if (transition.startedNew) state.app.onUserChanged()
     this.persistAfterEvent()
@@ -274,7 +275,8 @@ export class TrackerRuntime {
       return
     }
 
-    const sessions = new SessionManager(config.sessionPolicy, this.dependencies.sessionIdFactory, hydrated.state.session.snapshot)
+    const sessions = new SessionManager(config.sessionPolicy, this.dependencies.sessionIdFactory, hydrated.state.session.snapshot,
+      hydrated.state.identity.identity.lastUserId ?? hydrated.state.identity.identity.userId)
     const sequence = new EventSequence(hydrated.state.meta.snapshot.eventSequenceId)
     const location = new LocationState()
     const identity = { value: hydrated.state.identity.identity }
@@ -306,18 +308,34 @@ export class TrackerRuntime {
       persistSession: (snapshot) => { if (snapshot !== null) void sessionPersistence.persist(snapshot) },
       forceFlush: () => { if (uploader !== null) void uploader.forceFlush() },
     })
+    let connected = this.dependencies.network?.isConnected()
+    let networkRevision = 0
     const updateNetwork = (next: NetworkState): void => {
+      networkRevision++
       networkState = next
       // cellular/unknown 也可能明确联网；由独立连接状态决定能否恢复上传。
-      uploader?.flush()
+      const nextConnected = this.dependencies.network?.isConnected()
+      if (connected === false && nextConnected !== false) uploader?.flush()
+      else uploader?.schedule()
+      connected = nextConnected
     }
     const stopNetwork = this.dependencies.network === undefined ? null : this.dependencies.network.subscribe(updateNetwork)
-    if (this.dependencies.network !== undefined) {
-      void this.dependencies.network.current().then(updateNetwork).catch(() => updateNetwork('UNKNOWN'))
+    let readingNetwork = false
+    const refreshNetwork = (): void => {
+      const network = this.dependencies.network
+      if (network === undefined || readingNetwork) return
+      readingNetwork = true
+      const revision = networkRevision
+      const applyReading = (next: NetworkState): void => {
+        // A host notification can arrive after current() settles but before its Promise callback.
+        if (revision === networkRevision) updateNetwork(next)
+      }
+      void network.current().then(applyReading).catch(() => applyReading('UNKNOWN')).finally(() => { readingNetwork = false })
     }
+    refreshNetwork()
     this.state = {
       identity, identityPersistence, sessionPersistence, metaPersistence, queuePersistence, queue, sequence, sessions, location,
-      app: appWithFlush, page, dispatcher, pages, uploader, stopNetwork,
+      app: appWithFlush, page, dispatcher, pages, uploader, stopNetwork, refreshNetwork,
       autoTrackProfile: this.dependencies.autoTrackProfile ?? appCapabilityProfile(hydrated.state.systemContext.platform, typeof __GIO_AUTOTRACK_VERIFICATION__ !== 'undefined' && __GIO_AUTOTRACK_VERIFICATION__ === true),
     }
     this.log('success', '[GrowingIO]：Gio uni-app SDK 初始化完成！')
@@ -335,7 +353,15 @@ export class TrackerRuntime {
   }
 
   private submitLifecycle(kind: string, payload: Readonly<Record<string, unknown>>): boolean {
-    return this.gate.submitLifecycle({ kind, payload }, (intent) => this.emit(intent))
+    if (this.lifecycle.config() === null) return false
+    // Preserve observed background intervals through hydration; wire timestamps still use creation time.
+    const timed = kind === 'app-show' || kind === 'app-hide'
+    let observedAt: number | undefined
+    if (timed) {
+      try { observedAt = this.dependencies.clock.now() } catch { return false }
+      if (!Number.isFinite(observedAt) || observedAt < 0) return false
+    }
+    return this.gate.submitLifecycle({ kind, payload, ...(observedAt === undefined ? {} : { observedAt }) }, (intent) => this.emit(intent))
   }
 
   private emit(intent: TrackerIntent): boolean {
@@ -378,12 +404,13 @@ export class TrackerRuntime {
       case 'autotrack': emitted = state.dispatcher.autoTrack(payload as NormalizedAutoTrackCall); break
       case 'app-launch': state.app.onLaunch(payload as AppEntrySnapshot); emitted = true; lifecycleHandled = true; break
       case 'app-show':
-        emitted = state.app.onShow(payload as AppEntrySnapshot).visitQueued
+        emitted = state.app.onShow(payload as AppEntrySnapshot, intent.observedAt).visitQueued
+        state.refreshNetwork()
         this.appShown = true
         lifecycleHandled = true
         for (const command of this.pendingSessionCommands.drain()) this.emit(command as TrackerIntent)
         break
-      case 'app-hide': emitted = state.app.onHide().appClosedQueued; lifecycleHandled = true; break
+      case 'app-hide': emitted = state.app.onHide(intent.observedAt).appClosedQueued; lifecycleHandled = true; break
       case 'page-load': emitted = state.page.onLoad(payload as PageLoadInput) !== null; lifecycleHandled = true; break
       case 'page-title':
         if (typeof payload.instanceId !== 'string' || typeof payload.title !== 'string') return false
@@ -405,7 +432,7 @@ export class TrackerRuntime {
     const state = this.state
     if (state === null) return false
     const previous = state.identity.value
-    if (previous.deviceId === identity.deviceId && previous.userId === identity.userId && previous.userKey === identity.userKey) return true
+    if (previous.deviceId === identity.deviceId && previous.userId === identity.userId && previous.userKey === identity.userKey && previous.lastUserId === identity.lastUserId) return true
     state.identity.value = identity
     void state.identityPersistence.persist(identity)
     return true
@@ -424,7 +451,7 @@ export class TrackerRuntime {
     if (state === null) return
     void state.queuePersistence.persist(state.queue)
     void state.metaPersistence.persist(state.sequence.current())
-    state.uploader?.flush()
+    state.uploader?.schedule()
   }
 
   /** Matches the mini-program SDK's lifecycle diagnostics while keeping event JSON at send time. */

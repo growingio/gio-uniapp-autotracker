@@ -1,7 +1,7 @@
 import { BootstrapBuffer } from './bootstrap-buffer.js'
 import { TrackerLifecycle } from './tracker-lifecycle.js'
 
-export type TrackerIntent = Readonly<{ kind: string; payload: Readonly<Record<string, unknown>>; collecting?: boolean }>
+export type TrackerIntent = Readonly<{ kind: string; payload: Readonly<Record<string, unknown>>; collecting?: boolean; observedAt?: number }>
 type BufferedIntent = Readonly<{ order: number; intent: TrackerIntent }>
 const lifecycleKinds = new Set(['app-launch', 'app-show', 'app-hide', 'page-load', 'page-show', 'page-hide', 'page-unload', 'page-title', 'collection-resume'])
 
