@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { AppSystemContext, LoggerPort, NetworkPort, NetworkState, StorageArea, StoragePort, StorageRead, StorageWrite, TransportPort } from '../../core/ports.js'
 import type { UploaderRuntime } from '../../core/uploader.js'
+import type { ProtocolEvent } from '../../core/protocol.js'
 import { TrackerRuntime } from '../../runtime/tracker.js'
 
 class MemoryStorage implements StoragePort {
@@ -47,6 +48,31 @@ function createTracker(dataCollect = true, autoTracking = false, debug = false, 
 }
 
 describe('TrackerRuntime', () => {
+  it('App 事件在调用时立即发送并输出事件日志，不等待聚合定时器', async () => {
+    const logs: string[] = []
+    const requests: ProtocolEvent[][] = []
+    const tracker = new TrackerRuntime({
+      storage: new MemoryStorage(), systemContext: { load: async () => system }, clock: { now: () => 100 },
+      timezone: { getOffsetMinutes: () => 0 }, deviceIdFactory: () => 'device', sessionIdFactory: () => 'session',
+      orientation: () => 'PORTRAIT',
+      logger: { info: () => undefined, success: () => undefined, warn: () => undefined, error: () => undefined, debug: message => { logs.push(message) } },
+      upload: {
+        transport: { dispatch: (request, done) => { requests.push(JSON.parse(request.body)); done({ kind: 'success', status: 204 }) } },
+        runtime: { now: () => 100, random: () => 0.5, setTimeout: () => 1, clearTimeout: () => undefined },
+      },
+    })
+    tracker.init({ accountId: 'account', dataSourceId: 'source', debug: true })
+    tracker.onAppLaunch({ path: '/home', query: '' })
+    tracker.onAppShow({ path: '/home', query: '' })
+    await tracker.whenReady()
+    expect(requests.flat().map(event => event.eventType)).toEqual(['VISIT'])
+    tracker.track('immediate_event')
+    expect(requests.flat().map(event => event.eventType)).toEqual(['VISIT', 'CUSTOM'])
+    expect(logs.filter(line => line.startsWith('[GrowingIO Debug]: [')).map(line => JSON.parse(line.slice('[GrowingIO Debug]: '.length))).flat()).toMatchObject([
+      { eventType: 'VISIT' }, { eventType: 'CUSTOM', eventName: 'immediate_event' },
+    ])
+  })
+
   it.each([[30_200, false], [30_201, true]] as const)('uses observed background duration while hydration is pending: show=%i renewed=%s', async (returnAt, renewed) => {
     let now = 100
     let complete: (context: AppSystemContext) => void = () => { throw new Error('hydration_not_started') }
@@ -196,11 +222,12 @@ describe('TrackerRuntime', () => {
     expect(logs).toContain('success:[GrowingIO]：Gio uni-app SDK 初始化完成！')
     expect(logs).toContain('debug:App: onShow 100')
     const debugEventLogs = logs.filter((line) => line.startsWith('debug:[GrowingIO Debug]: ['))
-    expect(debugEventLogs).toHaveLength(1)
+    expect(debugEventLogs).toHaveLength(2)
     expect(JSON.parse(debugEventLogs[0]!.slice('debug:[GrowingIO Debug]: '.length))).toEqual(
       expect.arrayContaining([expect.objectContaining({ eventType: 'VISIT' })]),
     )
-    expect(requests).toStrictEqual(['sent'])
+    expect(JSON.parse(debugEventLogs[1]!.slice('debug:[GrowingIO Debug]: '.length))).toMatchObject([{ eventType: 'APP_CLOSED' }])
+    expect(requests).toStrictEqual(['sent', 'sent'])
   })
 
   it('logs App and Page lifecycle timestamps even while collection is disabled', async () => {
@@ -373,7 +400,7 @@ describe('TrackerRuntime', () => {
     ])
   })
 
-  it('starts the optional uploader on background flush and lets accepted batches leave the queue', async () => {
+  it('sends App events immediately and flushes APP_CLOSED on background', async () => {
     const requests: string[] = []
     const transport: TransportPort = {
       dispatch: (request, done) => {
@@ -396,7 +423,7 @@ describe('TrackerRuntime', () => {
     await tracker.whenReady()
     tracker.onAppHide()
 
-    expect(requests).toStrictEqual(['https://napi.growingio.com/v3/projects/account/collect?stm=123&compress=0'])
+    expect(requests).toStrictEqual(Array(2).fill('https://napi.growingio.com/v3/projects/account/collect?stm=123&compress=0'))
     expect(tracker.queuedEvents()).toStrictEqual([])
   })
 

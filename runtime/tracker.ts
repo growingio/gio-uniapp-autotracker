@@ -60,7 +60,7 @@ type RuntimeState = Readonly<{
   autoTrackProfile: AppCapabilityProfile | null
   uploader: Uploader | null
   stopNetwork: (() => void) | null
-  refreshNetwork: () => void
+  refreshNetwork: (requireFresh?: boolean) => void
 }>
 
 function record(value: unknown): Readonly<Record<string, unknown>> | null {
@@ -321,16 +321,28 @@ export class TrackerRuntime {
     }
     const stopNetwork = this.dependencies.network === undefined ? null : this.dependencies.network.subscribe(updateNetwork)
     let readingNetwork = false
-    const refreshNetwork = (): void => {
+    let refreshPending = false
+    const refreshNetwork = (requireFresh = false): void => {
       const network = this.dependencies.network
-      if (network === undefined || readingNetwork) return
+      if (network === undefined) return
+      if (readingNetwork) {
+        // Startup may share its first read, but a later foreground needs a fresh reading.
+        refreshPending ||= requireFresh
+        return
+      }
       readingNetwork = true
       const revision = networkRevision
       const applyReading = (next: NetworkState): void => {
         // A host notification can arrive after current() settles but before its Promise callback.
         if (revision === networkRevision) updateNetwork(next)
       }
-      void network.current().then(applyReading).catch(() => applyReading('UNKNOWN')).finally(() => { readingNetwork = false })
+      void network.current().then(applyReading).catch(() => applyReading('UNKNOWN')).finally(() => {
+        readingNetwork = false
+        if (refreshPending) {
+          refreshPending = false
+          refreshNetwork()
+        }
+      })
     }
     refreshNetwork()
     this.state = {
@@ -405,7 +417,7 @@ export class TrackerRuntime {
       case 'app-launch': state.app.onLaunch(payload as AppEntrySnapshot); emitted = true; lifecycleHandled = true; break
       case 'app-show':
         emitted = state.app.onShow(payload as AppEntrySnapshot, intent.observedAt).visitQueued
-        state.refreshNetwork()
+        state.refreshNetwork(this.appShown)
         this.appShown = true
         lifecycleHandled = true
         for (const command of this.pendingSessionCommands.drain()) this.emit(command as TrackerIntent)

@@ -41,10 +41,12 @@ export function createAppTracker(host: AppRuntimeHost, options: AppRuntimeOption
   const tracker = new TrackerRuntime({
     storage,
     systemContext: (config: ResolvedGioConfig) => ({
-      load: async () => ({
-        ...(await new AppSystemContextPort(host, options.sdkVersion, config.appVersionFallback).load()),
-        networkState: await network.current(),
-      }),
+      load: async () => {
+        const context = await new AppSystemContextPort(host, options.sdkVersion, config.appVersionFallback).load()
+        // Network metadata is refreshed in the background; it must not hold up App events.
+        void network.current()
+        return { ...context, networkState: network.cached() }
+      },
     }),
     clock: { now: () => Date.now() },
     timezone: { getOffsetMinutes: () => new Date().getTimezoneOffset() },

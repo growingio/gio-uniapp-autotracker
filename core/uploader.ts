@@ -6,8 +6,6 @@ import { EventQueue } from './queue.js'
 import { dispatchWithFinalizer, type TimerPort } from './transport-finalizer.js'
 
 export const MAX_CONCURRENT_UPLOADS = 3
-export const UPLOAD_BATCH_THRESHOLD = 20
-export const UPLOAD_INTERVAL_MS = 5_000
 const RETRY_DELAYS_MS = [800, 1_600] as const
 
 export interface UploaderRuntime extends TimerPort {
@@ -27,8 +25,7 @@ export class Uploader {
   private pendingRetries = 0
   private readonly readyRetries: Array<{ batch: readonly QueueEntry[]; attempt: number }> = []
   private flushing = false
-  private scheduled: unknown | null = null
-  /** Explicit flushes authorize only their existing events; later arrivals keep their own window. */
+  /** Accepted events waiting for an available transport slot. */
   private readonly readyRequests = new Set<string>()
   private readonly reservedRequests = new Set<string>()
   private readonly drainWaiters = new Set<() => void>()
@@ -46,26 +43,12 @@ export class Uploader {
     private readonly canDispatch: () => boolean = () => true,
   ) {}
 
-  /** Normal event delivery coalesces from the first waiting event, without postponing its deadline. */
+  /** App events are eligible immediately; only transport slots and retries can delay dispatch. */
   public schedule(): void {
-    const waiting = this.queue.snapshot().filter(entry => !this.reservedRequests.has(entry.requestId) && !this.readyRequests.has(entry.requestId))
-    if (waiting.length === 0) return
-    if (waiting.length >= UPLOAD_BATCH_THRESHOLD) {
-      this.flush()
-      return
-    }
-    if (this.scheduled !== null) return
-    this.scheduled = this.runtime.setTimeout(() => {
-      this.scheduled = null
-      this.flush()
-    }, UPLOAD_INTERVAL_MS)
+    this.flush()
   }
 
   public flush(): void {
-    if (this.scheduled !== null) {
-      this.runtime.clearTimeout(this.scheduled)
-      this.scheduled = null
-    }
     for (const entry of this.queue.snapshot()) {
       if (!this.reservedRequests.has(entry.requestId)) this.readyRequests.add(entry.requestId)
     }

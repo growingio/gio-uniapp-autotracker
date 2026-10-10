@@ -6,6 +6,88 @@ import { dispatchAutoTrack } from '../../runtime/autotrack-dispatch.js'
 describe('createAppTracker', () => {
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
 
+  it('网络类型慢回调不阻塞首个 VISIT，回调完成后更新后续事件', async () => {
+    vi.useFakeTimers()
+    const payloads: string[] = []
+    const readNetwork = vi.fn((options: { success: (result: { networkType: string }) => void }) => {
+      setTimeout(() => options.success({ networkType: 'wifi' }), 800)
+    })
+    const tracker = createAppTracker({
+      getStorageSync: () => undefined, setStorageSync: () => undefined, removeStorageSync: () => undefined,
+      getDeviceInfo: () => ({ platform: 'android' }), getSystemInfoSync: () => ({}), getAppBaseInfo: () => ({}),
+      getNetworkType: readNetwork,
+      request: options => { payloads.push(options.data); options.success({ statusCode: 204 }) },
+    }, { sdkVersion: '0.1.0', deviceIdFactory: () => 'device', sessionIdFactory: () => 'session' })
+    tracker.init({ accountId: 'account', dataSourceId: 'source' })
+    tracker.onAppShow({ path: '/home', query: '' })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(tracker.ready()).toBe(true)
+    expect(payloads.flatMap(payload => JSON.parse(payload))).toMatchObject([{ eventType: 'VISIT', networkState: 'UNKNOWN' }])
+    expect(readNetwork).toHaveBeenCalledOnce()
+    await vi.advanceTimersByTimeAsync(800)
+    expect(readNetwork).toHaveBeenCalledOnce()
+    tracker.track('after_network_reply')
+    expect(payloads.flatMap(payload => JSON.parse(payload)).at(-1)).toMatchObject({ eventType: 'CUSTOM', networkState: 'WIFI' })
+  })
+
+  it('网络查询不回调时也立即就绪，Native 明确断网仍保留事件', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('plus', { networkinfo: { CONNECTION_NONE: 1, getCurrentType: () => 1 } })
+    const request = vi.fn((options: { success: (result: { statusCode: number }) => void }) => options.success({ statusCode: 204 }))
+    const tracker = createAppTracker({
+      getStorageSync: () => undefined, setStorageSync: () => undefined, removeStorageSync: () => undefined,
+      getDeviceInfo: () => ({ platform: 'android' }), getSystemInfoSync: () => ({}), getAppBaseInfo: () => ({}),
+      getNetworkType: () => undefined, request,
+    }, { sdkVersion: '0.1.0', deviceIdFactory: () => 'device', sessionIdFactory: () => 'session' })
+    tracker.init({ accountId: 'account', dataSourceId: 'source' })
+    tracker.onAppShow({ path: '/home', query: '' })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(tracker.ready()).toBe(true)
+    expect(tracker.queuedEvents()).toMatchObject([{ eventType: 'VISIT', networkState: 'UNKNOWN' }])
+    expect(request).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(request).not.toHaveBeenCalled()
+    expect(tracker.queuedEvents()).toHaveLength(1)
+  })
+
+  it.each(['missing', 'throws'] as const)('首读未完成时回前台不会丢失网络重查，订阅 %s', async (subscription) => {
+    vi.useFakeTimers()
+    vi.stubGlobal('plus', { networkinfo: { CONNECTION_NONE: 1, getCurrentType: () => 1 } })
+    let networkType = 'none'
+    const payloads: string[] = []
+    const readNetwork = vi.fn((options: { success: (result: { networkType: string }) => void }) => {
+      const observedType = networkType
+      setTimeout(() => options.success({ networkType: observedType }), 800)
+    })
+    const tracker = createAppTracker({
+      getStorageSync: () => undefined, setStorageSync: () => undefined, removeStorageSync: () => undefined,
+      getDeviceInfo: () => ({ platform: 'android' }), getSystemInfoSync: () => ({}), getAppBaseInfo: () => ({}),
+      getNetworkType: readNetwork,
+      ...(subscription === 'throws' ? { onNetworkStatusChange: () => { throw new Error('subscription failed') } } : {}),
+      request: options => { payloads.push(options.data); options.success({ statusCode: 204 }) },
+    }, { sdkVersion: '0.1.0', deviceIdFactory: () => 'device', sessionIdFactory: () => 'session' })
+    tracker.init({ accountId: 'account', dataSourceId: 'source' })
+    tracker.onAppShow({ path: '/home', query: '' })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(tracker.ready()).toBe(true)
+    expect(readNetwork).toHaveBeenCalledOnce()
+    tracker.track('offline_event')
+    tracker.onAppHide()
+    networkType = 'wifi'
+    tracker.onAppShow({ path: '/home', query: '' })
+    tracker.onAppHide()
+    tracker.onAppShow({ path: '/home', query: '' })
+    expect(payloads).toEqual([])
+    await vi.advanceTimersByTimeAsync(1_600)
+    expect(readNetwork).toHaveBeenCalledTimes(2)
+    expect(payloads.flatMap(payload => JSON.parse(payload))).toEqual(expect.arrayContaining([
+      expect.objectContaining({ eventName: 'offline_event', networkState: 'UNKNOWN' }),
+    ]))
+    expect(tracker.queuedEvents()).toEqual([])
+    tracker.track('after_recovery')
+    expect(JSON.parse(payloads.at(-1)!)).toMatchObject([{ eventName: 'after_recovery', networkState: 'WIFI' }])
+  })
+
   it.each(['missing', 'throws'] as const)('网络订阅 %s 时，离线启动后返回前台主动重查并补发', async (subscription) => {
     vi.useFakeTimers()
     let networkType = 'none'
@@ -105,7 +187,6 @@ describe('createAppTracker', () => {
       acceptedChange = dispatchAutoTrack({ schemaVersion: 2, source: 'template', kind: 'change', eventName: 'onSwitchChange', elementType: 'switch', trackValue: true }, {
         currentTarget: { id: 'subscription', dataset: {} }, detail: { value: false },
       })
-      await vi.advanceTimersByTimeAsync(5_000)
       changedOptions = tracker.setOptions({ dataCollect: false })
     } finally {
       Object.hasOwn = originalHasOwn
@@ -115,7 +196,7 @@ describe('createAppTracker', () => {
     expect(tracker.failed()).toBe(false)
     expect(acceptedChange).toBe(true)
     expect(changedOptions).toBe(true)
-    expect(urls).toEqual([expect.stringMatching(/^https:\/\/collector\.example\/v3\/projects\/account\/collect\?stm=\d+&compress=0$/)])
+    expect(urls).toEqual(Array(3).fill(expect.stringMatching(/^https:\/\/collector\.example\/v3\/projects\/account\/collect\?stm=\d+&compress=0$/)))
     expect(payloads.flatMap((payload) => JSON.parse(payload))).toEqual(expect.arrayContaining([
       expect.objectContaining({ eventType: 'VISIT', screenWidth: 1170, screenHeight: 2532, deviceType: 'PHONE' }),
       expect.objectContaining({ eventType: 'PAGE' }),
@@ -138,14 +219,12 @@ describe('createAppTracker', () => {
     expect(tracker.init({ accountId: 'account', dataSourceId: 'source', appVersion: 'fallback' })).toBe(true)
     tracker.onAppShow({ path: '/home', query: '' })
     await tracker.whenReady()
-    expect(requests).toHaveLength(0)
-    await vi.advanceTimersByTimeAsync(5_000)
     expect(requests).toHaveLength(1)
     expect(tracker.queuedEvents()).toStrictEqual([])
     expect(dispatchAutoTrack({ schemaVersion: 2, source: 'template', kind: 'click', eventName: 'save' })).toBe(false)
   })
 
-  it('waits for the initial network read before composing the first VISIT', async () => {
+  it('uses synchronously available network metadata in the first VISIT', async () => {
     vi.useFakeTimers()
     const payloads: string[] = []
     const tracker = createAppTracker({
@@ -160,7 +239,6 @@ describe('createAppTracker', () => {
     expect(tracker.init({ accountId: 'account', dataSourceId: 'source' })).toBe(true)
     tracker.onAppShow({ path: '/home', query: '' })
     await tracker.whenReady()
-    await vi.advanceTimersByTimeAsync(5_000)
     expect(JSON.parse(payloads[0] ?? '')[0]).toMatchObject({
       eventType: 'VISIT', networkState: 'WIFI', deviceBrand: 'huawei', deviceModel: 'BRA-AL00',
     })

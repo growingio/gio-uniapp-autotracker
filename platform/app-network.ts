@@ -52,9 +52,12 @@ export class AppNetworkPort implements NetworkPort {
   private state: NetworkState = 'UNKNOWN'
   private connected: boolean | null = null
   private revision = 0
+  private reading: Promise<NetworkState> | null = null
   public constructor(private readonly api: AppNetworkApi) {}
 
   public isConnected(): boolean | null { return this.connected }
+  /** The best available reading, without waiting for an asynchronous host callback. */
+  public cached(): NetworkState { return this.state }
 
   private update(value: NetworkSnapshot): void {
     this.state = value.state
@@ -63,8 +66,10 @@ export class AppNetworkPort implements NetworkPort {
   }
 
   public current(): Promise<NetworkState> {
+    if (this.reading !== null) return this.reading
+    if (this.revision === 0) this.update(plusNetworkState())
     const revision = ++this.revision
-    return new Promise((resolve) => {
+    const reading = new Promise<NetworkState>((resolve) => {
       let settled = false
       let timeout: ReturnType<typeof globalThis.setTimeout> | null = null
       const finish = (value: NetworkSnapshot): void => {
@@ -82,6 +87,10 @@ export class AppNetworkPort implements NetworkPort {
         finish(plusNetworkState())
       }
     })
+    this.reading = reading
+    const clearReading = (): void => { if (this.reading === reading) this.reading = null }
+    void reading.then(clearReading, clearReading)
+    return reading
   }
 
   public subscribe(listener: (state: NetworkState) => void): () => void {
