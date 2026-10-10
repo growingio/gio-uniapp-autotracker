@@ -14,6 +14,8 @@
 
 动态事件、自定义组件、事件修饰符、计算成员和无法安全改写的复杂 handler 保持原样并产生构建告警；`.nvue` 不插桩。picker-view 仅从固定列的静态文本或字面量 v-for 提取 range；动态 range 回退规范下标，不重复读取业务 getter。完整边界见[设计文档](./uniapp-autotrack-design.md)。
 
+明确标记静态 `data-growing-ignore` 的监听已经主动排除采集，不再报告上述采集边界告警，原监听不改写。可正常插桩的 ignore 控件仍保留探针与运行时隐私检查。只有确定启用的标记（空值、true、1 及对应字符串字面量）适用；false / 0、动态绑定、对象或动态属性 v-bind 可能覆盖的标记仍保留诊断。模板语法和缺失 handler 的错误不受此规则影响。
+
 ## 编译依赖修复
 
 `@vue/compiler-dom`、`@vue/compiler-sfc` 与本工程 Vue 统一锁定为 `3.4.21`，对应当前 HBuilderX 5.24 工具链。此前新增的 compiler-sfc 3.5.42 在 HBuilderX 对 `@vue/shared` 设置全局别名后，复现了 `shared.genCacheKey is not a function`；统一版本后，同一混用场景已通过。新增子进程回归测试模拟该别名边界，发布时解析器已经打包进 Vite 工具，检查还会在仓库外执行真实压缩包中的编译插件并验证 App 运行时依赖隔离。

@@ -139,6 +139,22 @@ describe('schema v2 Vue instrumentation', () => {
     expect(transformAutoTrackTemplate(template)).toMatchObject({ code: template, changed: false })
     expect(transformAutoTrackTemplate(template).warnings.map((warning) => warning.code)).toEqual(['dynamic_event', 'custom_component', 'event_modifiers', 'missing_handler', 'unsupported_event'])
   })
+  it.each(['data-growing-ignore', 'data-growing-ignore="true"', 'data-growing-ignore="1"', ':data-growing-ignore="true"', ':data-growing-ignore="1"', ':data-growing-ignore="\'1\'"'])('does not diagnose intentionally excluded listeners: %s', (ignore) => {
+    const template = `<button ${ignore} @tap="save"/><button ${ignore} @tap="handlers[key]($event)"/><button ${ignore} @tap.stop="save($event)"/><button ${ignore} v-on:[name]="save($event)"/><custom-button ${ignore} @click="save($event)"/><input ${ignore} @input="save($event)"/>`
+    expect(transformAutoTrackTemplate(template)).toEqual({ code: template, changed: false, warnings: [] })
+    const warnings: string[] = []
+    expect(gioUniappAutoTrack().transform.call({ warn: warning => warnings.push(warning) }, source(template), 'ignored.vue')).toBeNull()
+    expect(warnings).toEqual([])
+  })
+  it.each(['data-growing-ignore="false"', 'data-growing-ignore="0"', ':data-growing-ignore="false"', ':data-growing-ignore="0"', ':data-growing-ignore="ignore"', 'data-growing-ignore v-bind="attributes"', 'data-growing-ignore v-bind:[attribute]="value"', 'data-growing-ignore :data-growing-ignore="ignore"'])('retains diagnostics when exclusion is false or can change: %s', (ignore) => {
+    expect(transformAutoTrackTemplate(`<button ${ignore} @tap.stop="save($event)"/>`).warnings.map(warning => warning.code)).toEqual(['event_modifiers'])
+  })
+  it('keeps valid ignored probes, descendant diagnostics, and malformed handler diagnostics', () => {
+    const result = transformAutoTrackTemplate('<view data-growing-ignore @tap="save($event)"><button @tap.stop="save($event)"/></view><button data-growing-ignore @tap/>')
+    expect(handlers(result.code)[0]).toContain('ignored:""')
+    expect(result.warnings.map(warning => warning.code)).toEqual(['event_modifiers', 'missing_handler'])
+    expect(transformAutoTrackTemplate('<view data-growing-ignore><button></view>').warnings[0]?.code).toBe('template_parse_error')
+  })
   it('selects change before blur before confirm while preserving unselected listeners', () => {
     const transformed = transformAutoTrackTemplate('<input @blur="blur($event)" @confirm="confirm($event)" @change="change($event)"/><textarea @confirm="finish($event)"/>')
     const listeners = handlers(transformed.code)

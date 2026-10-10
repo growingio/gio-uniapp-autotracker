@@ -32,6 +32,24 @@ function hasBound(element: ElementNode, name: string): boolean {
   return element.props.some((prop) => prop.type === NodeTypes.DIRECTIVE && prop.name === 'bind'
     && (prop.arg === undefined || prop.arg.type !== NodeTypes.SIMPLE_EXPRESSION || !prop.arg.isStatic || prop.arg.content === name))
 }
+function explicitlyIgnored(element: ElementNode): boolean {
+  // A spread or dynamic attribute can override ignore. Keep diagnostics in that case.
+  if (element.props.some(prop => prop.type === NodeTypes.DIRECTIVE && prop.name === 'bind'
+    && (prop.arg === undefined || prop.arg.type !== NodeTypes.SIMPLE_EXPRESSION || !prop.arg.isStatic))) return false
+  const markers = element.props.filter(prop => prop.type === NodeTypes.ATTRIBUTE ? prop.name === 'data-growing-ignore'
+    : prop.type === NodeTypes.DIRECTIVE && prop.name === 'bind' && prop.arg?.type === NodeTypes.SIMPLE_EXPRESSION
+      && prop.arg.isStatic && prop.arg.content === 'data-growing-ignore')
+  if (markers.length !== 1) return false
+  const marker = markers[0]
+  let value: unknown
+  if (marker?.type === NodeTypes.ATTRIBUTE) value = marker.value?.content ?? ''
+  else if (marker?.type === NodeTypes.DIRECTIVE && marker.exp?.type === NodeTypes.SIMPLE_EXPRESSION) {
+    const parsed = expression(marker.exp.content)
+    if (parsed === null || !['BooleanLiteral', 'NumericLiteral', 'StringLiteral'].includes(parsed.type)) return false
+    value = parsed.value
+  }
+  return value === true || value === '' || value === 'true' || value === 1 || value === '1'
+}
 function sensitive(element: ElementNode): boolean {
   if (element.tag !== 'input' && element.tag !== 'textarea') return false
   return hasBound(element, 'type') || hasBound(element, 'password') || element.props.some((prop) => prop.type === NodeTypes.ATTRIBUTE
@@ -120,11 +138,15 @@ function visit(nodes: readonly TemplateChildNode[], dispatcher: string, replacem
   for (const element of nodes) {
     if (element.type !== NodeTypes.ELEMENT) continue
     const selected = inputEvents.find((name) => element.props.some((prop) => prop.type === NodeTypes.DIRECTIVE && prop.name === 'on' && prop.arg?.type === NodeTypes.SIMPLE_EXPRESSION && prop.arg.isStatic && prop.arg.content === name))
+    const ignored = explicitlyIgnored(element)
     let hasClick = false
     let hasDynamic = false
     for (const prop of element.props) {
       if (prop.type !== NodeTypes.DIRECTIVE || prop.name !== 'on') continue
-      const warn = (code: AutoTrackTransformWarning['code']): void => { warnings.push({ code, offset: prop.loc.start.offset }) }
+      // An intentional exclusion is not a missed collection target. Keep syntax diagnostics.
+      const warn = (code: AutoTrackTransformWarning['code']): void => {
+        if (!ignored || code === 'missing_handler') warnings.push({ code, offset: prop.loc.start.offset })
+      }
       if (prop.arg?.type !== NodeTypes.SIMPLE_EXPRESSION || !prop.arg.isStatic) { hasDynamic = true; warn('dynamic_event'); continue }
       const nativeName = prop.arg.content
       const click = nativeName === 'click' || nativeName === 'tap'
