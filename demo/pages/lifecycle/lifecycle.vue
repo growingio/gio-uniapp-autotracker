@@ -10,17 +10,68 @@
       <button class="secondary" data-title="初始化后重复注册插件" @click="registerAfterInit($event)">验证初始化后重复注册插件</button>
       <text class="result">{{ result }}</text>
     </view>
+    <view class="section">
+      <text class="title">断网启动 / 回前台恢复（本次修复）</text>
+      <text class="hint">1. 关闭 Wi-Fi 和移动数据，彻底退出后重新打开 App，进入本页并发送离线标记。若连的是局域网 collector，请恢复同一 Wi-Fi。</text>
+      <button id="network-offline" data-growing-ignore @click="offlineScenario($event)">发送离线标记</button>
+      <text class="hint">2. 把 App 切到后台，在系统设置恢复网络，再回到本页。不要重新启动 App，发送恢复标记。</text>
+      <button id="network-recovered" data-growing-ignore :disabled="!networkRunId" @click="recoveredScenario($event)">发送恢复标记</button>
+      <text class="hint">预期：联网后两条 review_network_step 最终发送成功，phase 分别为 offline / recovered。在 Debug JSON / 请求中按同一 runId 对照，collector 确认接收结果。离线时返回 true 只表示入队；首次异步网络查询完成前 networkState 可能是 UNKNOWN。</text>
+      <text class="result">{{ networkResult }}</text>
+    </view>
+    <view class="section">
+      <text class="title">屏幕物理像素（本次修复）</text>
+      <button id="screen-context" data-growing-ignore @click="screenScenario($event)">读取屏幕信息并发送核对事件</button>
+      <text class="hint">将宿主逻辑尺寸乘以有效 DPR，四舍五入后按短边 / 长边排序。对照 review_screen_context 的 screenWidth / screenHeight；Android 的 PHONE / PAD 判定仍以逻辑短边 600 为界。请保持屏幕状态与启动时一致，折叠或改变显示配置后重新启动再核对。</text>
+      <text class="result">{{ screenResult }}</text>
+    </view>
     <view class="section"><text class="hint">APP_CLOSED 只能在真实 App 切到后台时触发；浏览器或静态检查不能替代这项验证。</text></view>
   </scroll-view>
 </template>
 
 <script>
 export default {
-  data() { return { result: '尚未操作。' } },
+  data() { return { result: '尚未操作。', networkRunId: '', networkRunCount: 0, networkResult: '尚未发送网络标记。', screenResult: '尚未读取屏幕信息。' } },
   methods: {
     trackAction() { this.result = gdp('track', 'lifecycle_demo_action', { page: 'lifecycle' }) ? '事件已入队。' : '未入队：先开启采集开关。' },
     goRoute() { uni.navigateTo({ url: `/pages/route/route?from=lifecycle&tick=${Date.now()}` }) },
     registerAfterInit() { this.result = gdp('registerPlugins', [{ name: 'gioEventAutoTracking' }]) ? '异常：初始化后仍允许注册插件。' : '已正确拒绝：插件只能在首次 init 前注册。' },
+    offlineScenario() {
+      if (this.networkRunId) { this.networkResult = '已有离线标记，请恢复网络并完成第 2 步后再开始。'; return false }
+      const runId = `network-${Date.now()}-${++this.networkRunCount}`
+      if (!gdp('track', 'review_network_step', { runId, phase: 'offline' })) { this.networkResult = '离线标记未入队：请开启采集并等待 SDK 就绪。'; return false }
+      this.networkRunId = runId
+      this.networkResult = `${runId}：离线标记已入队。请到系统设置恢复网络，再回到 App 发送恢复标记。`
+      return true
+    },
+    recoveredScenario() {
+      if (!this.networkRunId) { this.networkResult = '请先发送离线标记。'; return false }
+      const runId = this.networkRunId
+      if (!gdp('track', 'review_network_step', { runId, phase: 'recovered' })) { this.networkResult = '恢复标记未入队，可开启采集后重试。'; return false }
+      this.networkRunId = ''
+      this.networkResult = `${runId}：恢复标记已入队。请在 Debug JSON / 请求中对照两条标记，并在 collector 确认接收成功；当前界面未确认网络或发送结果。`
+      return true
+    },
+    screenScenario() {
+      const read = (get) => { try { const value = get(); return value && typeof value === 'object' && !Array.isArray(value) ? value : {} } catch { return {} } }
+      const device = read(() => uni.getDeviceInfo())
+      const system = read(() => uni.getSystemInfoSync())
+      const dimension = (value) => Number.isInteger(value) && value > 0 ? value : null
+      const ratioValue = (value) => Number.isFinite(value) && value > 0 ? value : null
+      const width = dimension(device.screenWidth) ?? dimension(system.screenWidth)
+      const height = dimension(device.screenHeight) ?? dimension(system.screenHeight)
+      const ratio = ratioValue(device.devicePixelRatio) ?? ratioValue(system.devicePixelRatio) ?? ratioValue(system.pixelRatio)
+      if (width === null || height === null || ratio === null) {
+        this.screenResult = '宿主未提供完整有效的逻辑尺寸 / DPR，无法独立核对物理像素。'
+        return false
+      }
+      const shortEdge = Math.round(Math.min(width, height) * ratio)
+      const longEdge = Math.round(Math.max(width, height) * ratio)
+      if (!Number.isFinite(shortEdge) || !Number.isFinite(longEdge) || shortEdge < 1) { this.screenResult = '宿主屏幕数据无法换算成有效物理尺寸。'; return false }
+      const queued = gdp('track', 'review_screen_context', { logicalWidth: width, logicalHeight: height, devicePixelRatio: ratio, expectedWidth: shortEdge, expectedHeight: longEdge })
+      this.screenResult = `宿主逻辑尺寸 ${width} × ${height}，DPR=${ratio}；预期物理短边 / 长边 ${shortEdge} × ${longEdge}。${queued ? '核对事件已入队，请比对事件字段。' : '核对事件未入队，请先开启采集。'}`
+      return queued
+    },
   },
 }
 </script>

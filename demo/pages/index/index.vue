@@ -6,7 +6,7 @@
     </view>
     <view class="section">
       <text class="section-title">开始前</text>
-      <text class="hint">默认已开启 dataCollect：App:onShow 会创建 VISIT，并在 uploader 真正发送前输出 Debug JSON。需要等待隐私同意时，再在 main.ts 显式设为 false 并通过「采集开关」页开启。</text>
+      <text class="hint">默认已开启 dataCollect：App:onShow 会创建 VISIT，并在 uploader 真正发送前输出 Debug JSON。需要等待隐私同意时，可在 sdk-state.ts 将 enabled 设为 false 并通过「采集开关」页开启。</text>
     </view>
     <view class="section">
       <text class="section-title">功能演示</text>
@@ -36,11 +36,11 @@ export default {
       note: '建议同时打开控制台和 mock collector 观察事件。',
       items: [
         { path: 'custom-event', title: '① 自定义事件 / track', description: '发送业务事件和用户属性，观察属性归一化。' },
-        { path: 'user', title: '② 用户身份 / setUserId', description: '设置、切换和清除用户身份及用户属性。' },
-        { path: 'lifecycle', title: '③ 生命周期 / VISIT / PAGE / APP_CLOSED', description: '通过切页和前后台切换观察生命周期事件。' },
-        { path: 'autotrack', title: '④ 无埋点 / VIEW_CLICK / VIEW_CHANGE', description: '按六组实机用例验证点击、变更、Vue 写法、隐私、链接和 tabBar。' },
+        { path: 'user', title: '② 用户身份 / setUserId', description: '退出后登录同一 / 不同账号，核对会话；验证非法编码不改变身份。' },
+        { path: 'lifecycle', title: '③ 生命周期 / VISIT / PAGE / APP_CLOSED', description: '切页、前后台、断网恢复与 DPR 屏幕物理尺寸核对。' },
+        { path: 'autotrack', title: '④ 无埋点 / VIEW_CLICK / VIEW_CHANGE', description: '六组实机用例：动态隐私、完成事件、冒泡去重、列表更新、文案映射和预期不采集边界。' },
         { path: 'route', title: '⑤ 路由 / query / referralPage', description: '带 query 跳转，验证 PAGE 上下文。' },
-        { path: 'datacollect', title: '⑥ 数据采集开关 / setOptions', description: '动态开启或关闭采集，并检查返回值。' },
+        { path: 'datacollect', title: '⑥ 数据采集开关 / setOptions', description: '同页暂停再恢复，核对新 PAGE 时间与后续事件页面时间一致。' },
       ],
     }
   },

@@ -15,6 +15,8 @@ const required = [
   'demo/components/auto-track-script-setup/auto-track-script-setup.vue',
   'demo/components/auto-track-setup-alias/auto-track-setup-alias.vue',
   'demo/components/uni-link/uni-link.vue',
+  'demo/components/auto-track-boundary-emit/auto-track-boundary-emit.vue',
+  'demo/pages/autotrack-boundary/autotrack-boundary.vue',
   'demo/pages/route/route.vue',
   'demo/pages/datacollect/datacollect.vue',
 ]
@@ -40,6 +42,8 @@ for (const file of required.filter((file) => file.endsWith('.vue'))) {
   if (source.includes('page-lifecycle') || source.includes("from '../../analytics'") || source.includes('$gio')) {
     throw new Error(`demo page must not import lifecycle or expose a tracker instance: ${file}`)
   }
+  const warnings = transformAutoTrackSfc(source).warnings
+  if (warnings.length > 0) throw new Error(`demo must compile without collection warnings: ${file}: ${warnings.map(warning => warning.code).join(', ')}`)
 }
 
 for (const file of ['demo/main.ts', 'demo/vite.config.ts']) {
@@ -75,7 +79,7 @@ for (const declaration of ['interface GdpCommand', 'type GioGdpInitOptions', 'ty
 }
 
 const pageConfig = JSON.parse(readFileSync(resolve(root, 'demo/pages.json'), 'utf8')) as Readonly<{ pages?: readonly { path?: unknown }[] }>
-for (const route of ['custom-event', 'user', 'lifecycle', 'autotrack', 'route', 'datacollect']) {
+for (const route of ['custom-event', 'user', 'lifecycle', 'autotrack', 'route', 'datacollect', 'autotrack-boundary']) {
   if (!pageConfig.pages?.some((page) => page.path === `pages/${route}/${route}`)) throw new Error(`pages.json is missing ${route}`)
 }
 
@@ -91,12 +95,18 @@ for (const file of [
   'demo/components/auto-track-script-setup/auto-track-script-setup.vue',
   'demo/components/auto-track-setup-alias/auto-track-setup-alias.vue',
   'demo/components/uni-link/uni-link.vue',
+  'demo/components/auto-track-boundary-emit/auto-track-boundary-emit.vue',
 ]) {
   const result = transformAutoTrackSfc(readFileSync(resolve(root, file), 'utf8'), '@/uni_modules/gio-uniapp-autotracker/autotrack.js')
   if (!result.changed || result.warnings.length > 0) throw new Error(`auto-track demo component must compile without warnings: ${file}`)
 }
-for (const marker of ['currentTarget 无 id', 'v-if 用例', 'v-show 用例', '<auto-track-script-setup', '<auto-track-setup-alias', 'data-growing-sensitive', '<uni-link']) {
+for (const marker of ['currentTarget 无 id', 'v-if 用例', 'v-show 用例', '<auto-track-script-setup', '<auto-track-setup-alias', 'data-growing-sensitive', '<uni-link', 'input-all-completions', 'privacy-ignore-toggle', 'bubble-child', 'picker-static-columns', 'banner-tracked', 'boundary-text', 'list-update', 'boundary-route']) {
   if (!autoTrackPage.includes(marker)) throw new Error(`auto-track showcase is missing acceptance case: ${marker}`)
+}
+
+const boundary = transformAutoTrackSfc(readFileSync(resolve(root, 'demo/pages/autotrack-boundary/autotrack-boundary.vue'), 'utf8'))
+if (!boundary.changed || boundary.warnings.length > 0) {
+  throw new Error('auto-track boundary page must explicitly exclude unsupported listeners and compile without warnings')
 }
 
 console.log('demo showcase structure is valid')

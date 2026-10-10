@@ -29,6 +29,10 @@
     {
       "path": "pages/datacollect/datacollect",
       "style": { "navigationBarTitleText": "采集开关 / setOptions" }
+    },
+    {
+      "path": "pages/autotrack-boundary/autotrack-boundary",
+      "style": { "navigationBarTitleText": "无埋点预期不采集场景" }
     }
   ],
   "globalStyle": {

@@ -50,7 +50,7 @@ describe('demo scenarios', () => {
     expect(demoFile('main.ts')).toContain("import gdp from '@/uni_modules/gio-uniapp-autotracker/index.js'")
 
     const pages = JSON.parse(demoFile('pages.json')) as Readonly<{ pages: readonly { path: string }[]; tabBar: { list: readonly { pagePath: string }[] } }>
-    const expected = ['index', 'custom-event', 'user', 'lifecycle', 'autotrack', 'route', 'datacollect']
+    const expected = ['index', 'custom-event', 'user', 'lifecycle', 'autotrack', 'route', 'datacollect', 'autotrack-boundary']
     expect(pages.pages.map((page) => page.path)).toStrictEqual(expected.map((name) => `pages/${name}/${name}`))
     expect(pages.tabBar.list.map((page) => page.pagePath)).toStrictEqual([
       'pages/index/index', 'pages/custom-event/custom-event', 'pages/user/user', 'pages/autotrack/autotrack',

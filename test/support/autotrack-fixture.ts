@@ -12,16 +12,35 @@ export const testAutoTrackProfile: AppCapabilityProfile = {
   autoChange: Object.fromEntries(CHANGE_ELEMENTS.map((element) => [element, true])) as AppCapabilityProfile['autoChange'],
 }
 
-type TestNode = { type: string; style: { display: string }; props: Record<string, unknown>; children: TestNode[]; parent: TestNode | null; text?: string }
-function makeNode(type: string): TestNode { return { type, style: { display: '' }, props: {}, children: [], parent: null } }
+type TestNode = {
+  type: string; style: { display: string }; props: Record<string, unknown>; children: TestNode[]; parent: TestNode | null; text?: string
+  value: unknown
+  addEventListener(name: string, listener: (event: unknown) => void): void
+  removeEventListener(name: string, listener: (event: unknown) => void): void
+  dispatchEvent(event: { type: string }): boolean
+}
+function makeNode(type: string): TestNode {
+  // Real demo pages contain v-model; retain Vue's input directive instead of removing it.
+  const listeners = new Map<string, Set<(event: unknown) => void>>()
+  const node: TestNode = {
+    type, style: { display: '' }, props: {}, children: [], parent: null, value: '',
+    addEventListener(name, listener) {
+      const handlers = listeners.get(name) ?? new Set()
+      handlers.add(listener); listeners.set(name, handlers)
+    },
+    removeEventListener(name, listener) { listeners.get(name)?.delete(listener) },
+    dispatchEvent(event) { listeners.get(event.type)?.forEach(listener => listener({ ...event, target: node })); return true },
+  }
+  return node
+}
 
-export function mountAutoTrackSfc(source: string, dispatch: (...args: unknown[]) => unknown, modules: Record<string, unknown> = {}, instrument = true) {
+export function compileAutoTrackSfc(source: string, dispatch: (...args: unknown[]) => unknown, modules: Record<string, unknown> = {}, instrument = true, componentTags: readonly string[] = []) {
   const transformed = instrument ? transformAutoTrackSfc(source, '@sdk/runtime') : { code: source, warnings: [], changed: false }
   const { descriptor } = parse(transformed.code)
   const script = compileScript(descriptor, { id: 'gio-test', genDefaultAs: '__Component' })
   const isTS = (descriptor.scriptSetup?.lang ?? descriptor.script?.lang) === 'ts'
   // 与 Vite Vue 插件一致，TypeScript 模板必须显式配置表达式解析插件。
-  const template = compileTemplate({ source: descriptor.template?.content ?? '', filename: 'fixture.vue', id: 'gio-test', compilerOptions: { isTS, expressionPlugins: isTS ? ['typescript'] : [], bindingMetadata: script.bindings, isCustomElement: (tag) => (TEMPLATE_ELEMENTS as readonly string[]).includes(tag) } })
+  const template = compileTemplate({ source: descriptor.template?.content ?? '', filename: 'fixture.vue', id: 'gio-test', compilerOptions: { isTS, expressionPlugins: isTS ? ['typescript'] : [], bindingMetadata: script.bindings, isCustomElement: (tag) => !componentTags.includes(tag) && (TEMPLATE_ELEMENTS as readonly string[]).includes(tag) } })
   if (template.errors.length > 0) throw new Error(String(template.errors[0]))
   const javascript = ts.transpileModule(`${script.content}\n${template.code}\n__Component.render=render;\nexport default __Component`, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
@@ -34,6 +53,11 @@ export function mountAutoTrackSfc(source: string, dispatch: (...args: unknown[])
     throw new Error(`unexpected_fixture_import:${name}`)
   }
   new Function('require', 'module', 'exports', javascript)(requireModule, output, output.exports)
+  return { transformed, component: output.exports.default }
+}
+
+export function mountAutoTrackSfc(source: string, dispatch: (...args: unknown[]) => unknown, modules: Record<string, unknown> = {}, instrument = true, componentTags: readonly string[] = []) {
+  const { transformed, component } = compileAutoTrackSfc(source, dispatch, modules, instrument, componentTags)
   const renderer = Vue.createRenderer<TestNode, TestNode>({
     createElement: makeNode, createText: (text) => ({ ...makeNode('#text'), text }), createComment: (text) => ({ ...makeNode('#comment'), text }),
     setText: (node, text) => { node.text = text }, setElementText: (node, text) => { node.text = text; node.children = [] },
@@ -47,7 +71,7 @@ export function mountAutoTrackSfc(source: string, dispatch: (...args: unknown[])
     patchProp: (node, key, _previous, value) => { node.props[key] = value },
   })
   const root = makeNode('root')
-  const app = renderer.createApp(output.exports.default)
+  const app = renderer.createApp(component)
   const instance = app.mount(root)
   function elements(): TestNode[] {
     const nodes: TestNode[] = []
