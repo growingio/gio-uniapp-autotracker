@@ -50,7 +50,7 @@ function platform(value: unknown): AppPlatform | null {
 }
 
 function dimension(value: unknown): number | null {
-  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : null
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null
 }
 
 function pixelRatio(value: unknown): number | null {

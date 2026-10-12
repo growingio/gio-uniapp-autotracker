@@ -56,6 +56,11 @@ describe('Protocol core', () => {
     expect(buildAppEvent(eventType, fields)).toStrictEqual({ ok: false, code })
   })
 
+  it.each(['\n', '\r', '\r\n', '\u2028', '\u2029'])('rejects trailing line terminators in custom event names: %j', (ending) => {
+    expect(buildAppEvent('CUSTOM', { ...context, eventSequenceId: 1, eventName: `valid${ending}` }))
+      .toEqual({ ok: false, code: 'invalid_custom_event_name' })
+  })
+
   it('rejects required values that sanitization would remove', () => {
     expect(buildAppEvent('VIEW_CLICK', {
       ...context, eventSequenceId: 1, pageShowTimestamp: 2, xpath: '',

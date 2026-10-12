@@ -55,6 +55,20 @@ describe('installUniAppLifecycle', () => {
       ['app-hide', null],
     ])
   })
+
+  it('isolates snapshot and tracker exceptions from every host lifecycle hook', () => {
+    let hooks!: HookSet
+    const fail = () => { throw new Error('SDK failure') }
+    installUniAppLifecycle({ mixin: value => { hooks = value as HookSet } }, {
+      onAppLaunch: fail, onAppShow: fail, onAppHide: fail, onPageLoad: fail, onPageShow: fail,
+      onPageHide: fail, onPageUnload: fail, onPageTitleChanged: fail, autoTrack: fail,
+    })
+    const page = { $mpType: 'page', $page: { route: 'pages/home' } }
+    const malformed = { get $mpType() { throw new Error('host getter') } }
+    for (const instance of [{}, page, malformed]) {
+      for (const hook of Object.values(hooks)) expect(() => hook.call(instance, {})).not.toThrow()
+    }
+  })
 })
 
 
@@ -137,6 +151,24 @@ describe('自动导航标题', () => {
     expect(target.onPageTitleChanged).not.toHaveBeenCalled()
     expect(success).toHaveBeenCalledOnce()
     expect(() => interceptor.invoke(Object.freeze({ title: '冻结参数' }))).not.toThrow()
+  })
+
+  it.each(['hide', 'unload'] as const)('clears the active title target even when page %s forwarding fails', (kind) => {
+    const { hooks, interceptor, target, page } = titleFixture()
+    const fail = () => { throw new Error('SDK failure') }
+    target.onPageHide = fail
+    target.onPageUnload = fail
+    const pending = { title: 'pending', success: vi.fn() }
+    interceptor.invoke(pending)
+    if (kind === 'hide') hooks.onHide.call(page)
+    else hooks.onUnload.call(page)
+    const options = { title: 'no active page' }
+    interceptor.invoke(options)
+    expect(options).not.toHaveProperty('success')
+    if (kind === 'unload') {
+      pending.success()
+      expect(target.onPageTitleChanged).not.toHaveBeenCalled()
+    }
   })
 
   it('标题拦截器安装失败不能阻止基础生命周期安装', () => {

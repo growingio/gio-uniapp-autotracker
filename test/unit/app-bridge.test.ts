@@ -23,4 +23,14 @@ describe('appEntrySnapshot', () => {
       ['launch', { path: null, query: null }], ['show', { path: null, query: null }], ['hide'],
     ])
   })
+
+  it('keeps valid query entries when a string cannot be URI encoded or a value getter throws', () => {
+    const query = { valid: '中文😀', broken: '\ud800', '\udfff': 'bad-key', get throwing() { throw new Error('host getter') }, zero: 0 }
+    expect(appEntrySnapshot({ path: '/home', query })).toEqual({ path: '/home', query: 'valid=%E4%B8%AD%E6%96%87%F0%9F%98%80&zero=0' })
+  })
+
+  it('falls back to an empty query when the host cannot enumerate the query object', () => {
+    const query = new Proxy({}, { ownKeys() { throw new Error('host proxy') } })
+    expect(appEntrySnapshot({ path: '/home', query })).toEqual({ path: '/home', query: null })
+  })
 })

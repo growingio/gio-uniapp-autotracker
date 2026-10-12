@@ -8,6 +8,23 @@ function event(number: number, value = ''): ProtocolEvent {
 }
 
 describe('EventQueue', () => {
+  it.each([false, true])('allocates distinct recoverable request ids after restoring the largest safe request number (occupied low id: %s)', (occupied) => {
+    const queue = new EventQueue()
+    const first: ProtocolEvent = { eventType: 'CUSTOM', eventName: 'restored', eventSequenceId: 1 }
+    const restored = [
+      ...(occupied ? [{ requestId: 'q1', event: { ...first, eventName: 'occupied' }, retryCount: 0 }] : []),
+      { requestId: `q${Number.MAX_SAFE_INTEGER}`, event: first, retryCount: 0 },
+    ]
+    expect(queue.restore(restored)).toBe(true)
+    expect(queue.enqueue({ ...first, eventName: 'next' }).ok).toBe(true)
+    expect(queue.enqueue({ ...first, eventName: 'last' }).ok).toBe(true)
+    const entries = queue.snapshot()
+    expect(new Set(entries.map(entry => entry.requestId)).size).toBe(restored.length + 2)
+    expect(new EventQueue().restore(entries)).toBe(true)
+    queue.remove([entries[restored.length]!.requestId])
+    expect(queue.snapshot().map(entry => entry.event.eventName)).toEqual([...restored.map(entry => entry.event.eventName), 'last'])
+  })
+
   it.each(['é', '中文', '😀'])('包含 %s 的事件按 UTF-8 字节和数组边界分批', (value) => {
     const first = event(1, value)
     const bytes = Buffer.byteLength(JSON.stringify(first), 'utf8')

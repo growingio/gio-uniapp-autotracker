@@ -119,6 +119,21 @@ describe('TrackerRuntime', () => {
     expect(tracker.track('after_ready')).toBe(true)
   })
 
+  it.each(['hydrating', 'before-show', 'ready'] as const)('rejects invalid custom names before reading attributes or reserving a buffer slot: %s', async (phase) => {
+    const { tracker } = createTracker()
+    if (phase !== 'hydrating') await tracker.whenReady()
+    if (phase === 'ready') tracker.onAppShow({ path: '/home', query: '' })
+    let reads = 0
+    const properties = { get value() { reads++; return 'business' } }
+    for (let index = 0; index < 60; index++) expect(tracker.track('invalid name', properties)).toBe(false)
+    for (const name of [null, undefined, '', 0, {}, '1event', 'a'.repeat(101), 'event\n', 'event\r', 'event\u2028']) expect(tracker.track(name, properties)).toBe(false)
+    expect(reads).toBe(0)
+    expect(tracker.track('valid_event')).toBe(true)
+    if (phase !== 'ready') tracker.onAppShow({ path: '/home', query: '' })
+    await tracker.whenReady()
+    expect(tracker.queuedEvents().map(event => event.eventType === 'CUSTOM' ? event.eventName : event.eventType)).toEqual(['VISIT', 'valid_event'])
+  })
+
   it('属性在初始化期间、等待首个会话期间和就绪后具有相同语义', async () => {
     const run = async (phase: 'hydrating' | 'before-show' | 'ready') => {
       const { tracker } = createTracker()
@@ -531,6 +546,23 @@ describe('TrackerRuntime', () => {
     expect(new Set(tracker.queuedEvents().map((event) => event.sessionId)).size).toBe(1)
     expect(tracker.setDataCollect(true)).toBe(true)
     expect(tracker.queuedEvents()).toHaveLength(2)
+  })
+
+  it('a rejected consent resume leaves collection disabled and can be retried after hydration', async () => {
+    const { tracker } = createTracker(false)
+    for (let index = 0; index < 50; index++) {
+      expect(tracker.onPageLoad({ instanceId: `page-${index}`, route: 'pages/privacy', query: '', referralPage: null })).toBe(true)
+    }
+    expect(tracker.setOptions({ dataCollect: true })).toBe(false)
+    let reads = 0
+    expect(tracker.track('still_disabled', { get privateValue() { reads++; return 'private' } })).toBe(false)
+    expect(reads).toBe(0)
+    await tracker.whenReady()
+    tracker.onAppShow({ path: '/privacy', query: '' })
+    tracker.onPageShow('page-0', 'Privacy')
+    expect(tracker.queuedEvents()).toEqual([])
+    expect(tracker.setOptions({ dataCollect: true })).toBe(true)
+    expect(tracker.queuedEvents().map(event => event.eventType)).toEqual(['VISIT', 'PAGE'])
   })
 
   it('后台业务事件读取实时 App 状态', async () => {

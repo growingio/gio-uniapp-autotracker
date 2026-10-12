@@ -9,7 +9,7 @@ import { LocationState } from '../core/location-state.js'
 import { MetaPersistence } from '../core/meta-persistence.js'
 import { PageStore, type PageLoadInput } from '../core/page-store.js'
 import type { ClockPort, LoggerPort, NetworkPort, NetworkState, StoragePort, SystemContextPort, TimezonePort, TransportPort } from '../core/ports.js'
-import { normalizeAttributes, type ProtocolEvent } from '../core/protocol.js'
+import { isValidCustomEventName, normalizeAttributes, type ProtocolEvent } from '../core/protocol.js'
 import { EventQueue } from '../core/queue.js'
 import { QueuePersistence } from '../core/queue-persistence.js'
 import { SessionPersistence } from '../core/session-persistence.js'
@@ -159,6 +159,7 @@ export class TrackerRuntime {
 
   private submitAttributes(kind: 'track' | 'user-attributes', properties: unknown, eventName?: unknown): boolean {
     if (this.lifecycle.config()?.dataCollect !== true) return false
+    if (kind === 'track' && !isValidCustomEventName(eventName)) return false
     try {
       // 在 JSON 快照之前统一属性语义；关闭采集时不能读取业务属性。
       const attributes = Object.fromEntries(normalizeAttributes(properties).attributes)
@@ -198,7 +199,10 @@ export class TrackerRuntime {
     const transition = this.lifecycle.setDataCollect(value)
     if (!transition.ok) return false
     if (!transition.sessionRenewalRequired) return true
-    return this.submitLifecycle('collection-resume', {})
+    if (this.submitLifecycle('collection-resume', {})) return true
+    // A full bootstrap buffer must not enable collection without its required resume boundary.
+    this.lifecycle.setDataCollect(false)
+    return false
   }
 
   /** Only collection consent is mutable after initialization; all init-time options stay fixed. */

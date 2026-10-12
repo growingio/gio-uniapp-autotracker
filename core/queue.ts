@@ -90,7 +90,7 @@ export class EventQueue {
     const normalized = cloneEvent(serialized)
     if (normalized === null) return { ok: false, code: 'event_not_serializable' }
 
-    const requestId = `q${this.nextRequestNumber++}`
+    const requestId = this.allocateRequestId()
     const candidate = [...this.entries, { requestId, event: normalized, retryCount: 0 }]
     if (utf8ByteLength(JSON.stringify({ version: 1, entries: candidate })) > this.limits.maxPersistedBytes) {
       return { ok: false, code: 'queue_full' }
@@ -168,8 +168,17 @@ export class EventQueue {
       const match = /^q(\d+)$/.exec(entry.requestId)
       return match === null ? largest : Math.max(largest, Number(match[1]))
     }, 0)
-    this.nextRequestNumber = largestRequestNumber + 1
+    this.nextRequestNumber = largestRequestNumber === Number.MAX_SAFE_INTEGER ? 1 : largestRequestNumber + 1
     return true
+  }
+
+  private allocateRequestId(): string {
+    let requestId: string
+    do {
+      requestId = `q${this.nextRequestNumber}`
+      this.nextRequestNumber = this.nextRequestNumber === Number.MAX_SAFE_INTEGER ? 1 : this.nextRequestNumber + 1
+    } while (this.entries.some((entry) => entry.requestId === requestId))
+    return requestId
   }
 
   public snapshot(): readonly QueueEntry[] {

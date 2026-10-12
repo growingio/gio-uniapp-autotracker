@@ -32,6 +32,15 @@ describe('AppSystemContextPort', () => {
     await expect(port.load()).resolves.toMatchObject({ screenWidth: 1081, screenHeight: 2346, deviceType: 'PHONE' })
   })
 
+  it.each(['android', 'ios', 'harmonyos'])('preserves fractional logical screen dimensions for %s before converting to physical pixels', async (platform) => {
+    const port = new AppSystemContextPort({
+      getDeviceInfo: () => ({ platform, deviceType: 'phone' }),
+      getSystemInfoSync: () => ({ screenWidth: 1080 / 2.75, screenHeight: 2340 / 2.75, pixelRatio: 2.75 }),
+      getAppBaseInfo: () => ({}),
+    }, '0.1.0', null)
+    await expect(port.load()).resolves.toMatchObject({ screenWidth: 1080, screenHeight: 2340, deviceType: 'PHONE' })
+  })
+
   it.each(['android', 'ios', 'harmonyos'])('使用 %s 的真实版本和宿主包字段，不能把引擎版本当应用版本', async (platform) => {
     const port = new AppSystemContextPort({
       getDeviceInfo: () => ({ platform, osVersion: '18.1', platformVersion: 'incorrect' }),

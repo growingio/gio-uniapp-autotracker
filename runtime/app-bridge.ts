@@ -20,12 +20,17 @@ export function querySnapshot(value: unknown): string | null {
   if (typeof value === 'string') return value
   const query = record(value)
   if (query === null) return null
-  return Object.entries(query)
-    .flatMap(([key, part]) => {
-      const normalized = scalar(part)
-      return normalized === null ? [] : [`${encodeURIComponent(key)}=${encodeURIComponent(normalized)}`]
-    })
-    .join('&')
+  try {
+    return Object.keys(query).flatMap((key) => {
+      try {
+        const normalized = scalar(query[key])
+        return normalized === null ? [] : [`${encodeURIComponent(key)}=${encodeURIComponent(normalized)}`]
+      } catch {
+        // One malformed host field must not erase the remaining route context.
+        return []
+      }
+    }).join('&')
+  } catch { return null }
 }
 
 /** Converts documented App lifecycle options into a JSON-only entry; unsupported query values are omitted. */

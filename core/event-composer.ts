@@ -21,7 +21,7 @@ export type EventComposeResult =
   | Readonly<{
     ok: false
     code: 'missing_session' | 'invalid_timestamp' | 'invalid_event_type' | 'missing_required_field'
-      | 'invalid_custom_event_name' | 'event_not_serializable' | 'event_too_large' | 'queue_full'
+      | 'invalid_custom_event_name' | 'invalid_field_value' | 'event_not_serializable' | 'event_too_large' | 'queue_full'
   }>
 
 function timezoneOffset(timezone: TimezonePort): string {

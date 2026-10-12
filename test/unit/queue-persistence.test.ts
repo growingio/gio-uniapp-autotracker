@@ -5,6 +5,7 @@ import { buildAppEvent } from '../../core/protocol.js'
 import { EventQueue } from '../../core/queue.js'
 import type { StoragePort } from '../../core/ports.js'
 import type { ProtocolEvent } from '../../core/protocol.js'
+import { APP_EVENT_FIXTURES } from '../contracts/app-protocol.fixture.js'
 
 function event(sequence: number): ProtocolEvent {
   const built = buildAppEvent('CUSTOM', {
@@ -90,6 +91,38 @@ describe('QueuePersistence', () => {
     }
     await expect(new QueuePersistence(port, 'gio:v1:source:queue:v1').hydrate(new EventQueue())).resolves.toBe('corrupt')
     expect(removed).toBe(1)
+  })
+
+  it.each([
+    { ...APP_EVENT_FIXTURES.CUSTOM, eventSequenceId: false },
+    { ...APP_EVENT_FIXTURES.CUSTOM, eventSequenceId: -1 },
+    { ...APP_EVENT_FIXTURES.CUSTOM, timestamp: '100' },
+    { ...APP_EVENT_FIXTURES.CUSTOM, timestamp: 100.5 },
+    { ...APP_EVENT_FIXTURES.CUSTOM, deviceId: { value: 'device' } },
+    { ...APP_EVENT_FIXTURES.CUSTOM, networkState: 'offline' },
+    { ...APP_EVENT_FIXTURES.CUSTOM, screenWidth: 10.5 },
+    { ...APP_EVENT_FIXTURES.CUSTOM, latitude: '30' },
+    { ...APP_EVENT_FIXTURES.CUSTOM, attributes: { nested: { private: 'bad' } } },
+    { ...APP_EVENT_FIXTURES.LOGIN_USER_ATTRIBUTES, attributes: ['bad'] },
+    { ...APP_EVENT_FIXTURES.PAGE, orientation: 'diagonal' },
+    { ...APP_EVENT_FIXTURES.VIEW_CLICK, pageShowTimestamp: { time: 100 } },
+    { ...APP_EVENT_FIXTURES.VIEW_CLICK, pageShowTimestamp: Number.MAX_SAFE_INTEGER + 1 },
+    { ...APP_EVENT_FIXTURES.VIEW_CHANGE, xpath: true },
+  ])('rejects damaged wire field values without replacing the live queue: %j', async (damaged) => {
+    const key = 'gio:v1:source:queue:v1'
+    const removed: string[] = []
+    const port: StoragePort = {
+      persistentQueue: true,
+      read: async () => ({ kind: 'value', value: JSON.stringify({ version: 1, revision: 1,
+        entries: [{ requestId: 'q2', retryCount: 0, event: damaged }] }) }),
+      write: async () => ({ kind: 'ok' }),
+      remove: async (area, name) => { removed.push(`${area}:${name}`); return { kind: 'ok' } },
+    }
+    const queue = new EventQueue()
+    queue.enqueue(event(9))
+    expect(await new QueuePersistence(port, key).hydrate(queue)).toBe('corrupt')
+    expect(queue.snapshot().map(entry => entry.event)).toEqual([event(9)])
+    expect(removed).toEqual([`queue:${key}`])
   })
 
   it('does not advance revision when storage rejects a write', async () => {

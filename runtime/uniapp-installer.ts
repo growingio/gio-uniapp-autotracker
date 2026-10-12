@@ -27,6 +27,12 @@ function isPage(instance: VueInstance): boolean {
   return instance.$mpType === 'page' && routeOf(instance) !== null
 }
 
+function isolatedLifecycleHook<Args extends unknown[]>(hook: (this: VueInstance, ...args: Args) => void) {
+  return function(this: VueInstance, ...args: Args): void {
+    try { hook.apply(this, args) } catch { /* SDK forwarding must never interrupt business lifecycle hooks. */ }
+  }
+}
+
 function pageTitle(instance: VueInstance): string | null {
   try {
     if (typeof instance.gioPageTitle === 'string') return instance.gioPageTitle
@@ -65,36 +71,40 @@ export function installUniAppLifecycle(app: UniAppVueApp, target: LifecycleTarge
   }
 
   app.mixin({
-    onLaunch(this: VueInstance, options: unknown) {
+    onLaunch: isolatedLifecycleHook(function(this: VueInstance, options: unknown) {
       if (!isPage(this)) appBridge.onLaunch(options)
-    },
-    onShow(this: VueInstance, options: unknown) {
+    }),
+    onShow: isolatedLifecycleHook(function(this: VueInstance, options: unknown) {
       const bridge = pageBridge(this)
       if (bridge !== null) {
         currentPage = this
         bridge.onShow(typeof this.gioPageTitle === 'string' ? this.gioPageTitle : titles.get(this) ?? pageTitle(this))
       }
       else appBridge.onShow(options)
-    },
-    onHide(this: VueInstance) {
-      const bridge = pageBridge(this)
-      if (bridge !== null) { bridge.onHide(); if (currentPage === this) currentPage = null }
-      else appBridge.onHide()
-    },
-    onLoad(this: VueInstance, query: unknown) {
+    }),
+    onHide: isolatedLifecycleHook(function(this: VueInstance) {
+      try {
+        const bridge = pageBridge(this)
+        if (bridge !== null) bridge.onHide()
+        else appBridge.onHide()
+      } finally { if (currentPage === this) currentPage = null }
+    }),
+    onLoad: isolatedLifecycleHook(function(this: VueInstance, query: unknown) {
       const bridge = pageBridge(this)
       const route = routeOf(this)
       if (bridge !== null && route !== null) { currentPage = this; bridge.onLoad(route, query) }
-    },
-    onUnload(this: VueInstance) {
-      pageBridge(this)?.onUnload()
-      pages.delete(this)
-      titles.delete(this)
-      if (currentPage === this) currentPage = null
-    },
-    onTabItemTap(this: VueInstance, options: unknown) {
+    }),
+    onUnload: isolatedLifecycleHook(function(this: VueInstance) {
+      try { pageBridge(this)?.onUnload() }
+      finally {
+        pages.delete(this)
+        titles.delete(this)
+        if (currentPage === this) currentPage = null
+      }
+    }),
+    onTabItemTap: isolatedLifecycleHook(function(this: VueInstance, options: unknown) {
       pageBridge(this)?.onTabItemTap(options)
-    },
+    }),
   })
 
   try {

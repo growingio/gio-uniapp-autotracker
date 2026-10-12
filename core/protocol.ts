@@ -46,11 +46,40 @@ const REQUIRED_COMMON_FIELDS = [
 
 const CUSTOM_EVENT_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,99}$/
 
+export function isValidCustomEventName(value: unknown): value is string {
+  return typeof value === 'string' && CUSTOM_EVENT_NAME.test(value)
+}
+
 export type AttributeDiagnostic = 'attribute_invalid_value' | 'attribute_key_collision'
 export type NormalizedAttributes = Readonly<{ attributes: ReadonlyMap<string, string>; diagnostics: readonly AttributeDiagnostic[] }>
 export type BuildEventResult =
   | Readonly<{ ok: true; event: ProtocolEvent }>
-  | Readonly<{ ok: false; code: 'invalid_event_type' | 'missing_required_field' | 'invalid_custom_event_name' }>
+  | Readonly<{ ok: false; code: 'invalid_event_type' | 'missing_required_field' | 'invalid_custom_event_name' | 'invalid_field_value' }>
+
+const FIELD_ENUMS: Readonly<Record<string, readonly string[]>> = {
+  platform: ['Android', 'iOS', 'HarmonyOS'],
+  appState: ['FOREGROUND', 'BACKGROUND'],
+  networkState: ['2G', '3G', '4G', '5G', 'WIFI', 'UNKNOWN'],
+  deviceType: ['PHONE', 'PAD', 'FOLD', 'UNKNOWN'],
+  orientation: ['PORTRAIT', 'LANDSCAPE'],
+}
+
+/** Checks retained wire values; missing system fields remain compatible with sanitized caches. */
+function validWireField(key: string, value: unknown): boolean {
+  switch (key) {
+    case 'eventSequenceId': return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+    case 'timestamp': case 'pageShowTimestamp': return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+    case 'screenWidth': case 'screenHeight': return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+    case 'index': return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value < 2147483647
+    case 'latitude': case 'longitude': return typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= (key === 'latitude' ? 90 : 180)
+    case 'attributes': return typeof value === 'object' && value !== null && !Array.isArray(value)
+      && Object.values(value).every((part) => typeof part === 'string')
+    default: {
+      const choices = FIELD_ENUMS[key]
+      return typeof value === 'string' && (choices === undefined || choices.includes(value))
+    }
+  }
+}
 
 function isEmptyOutboundValue(value: unknown): boolean {
   if (value === null || value === undefined || value === '') return true
@@ -110,7 +139,7 @@ export function normalizeAttributes(input: unknown): NormalizedAttributes {
 export function buildAppEvent(eventType: string, fields: Readonly<Record<string, unknown>>, restored = false): BuildEventResult {
   if (!APP_EVENT_TYPES.includes(eventType as AppEventType)) return { ok: false, code: 'invalid_event_type' }
   const typedEventType = eventType as AppEventType
-  if (typedEventType === 'CUSTOM' && (typeof fields.eventName !== 'string' || !CUSTOM_EVENT_NAME.test(fields.eventName))) {
+  if (typedEventType === 'CUSTOM' && !isValidCustomEventName(fields.eventName)) {
     return { ok: false, code: 'invalid_custom_event_name' }
   }
   const allowed = new Set([...COMMON_FIELDS, ...EVENT_FIELDS[typedEventType]])
@@ -123,5 +152,6 @@ export function buildAppEvent(eventType: string, fields: Readonly<Record<string,
   if (!restored && REQUIRED_COMMON_FIELDS.some((key) => !(key in candidate))) return { ok: false, code: 'missing_required_field' }
   const event = sanitizeOutboundEvent(candidate)
   if (REQUIRED_EVENT_FIELDS[typedEventType].some((key) => !(key in event))) return { ok: false, code: 'missing_required_field' }
+  if (!Object.entries(event).every(([key, value]) => validWireField(key, value))) return { ok: false, code: 'invalid_field_value' }
   return { ok: true, event: event as ProtocolEvent }
 }
