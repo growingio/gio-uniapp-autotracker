@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { StoragePort, StorageRead } from '../../core/ports.js'
-import { IdentityPersistence } from '../../core/identity-persistence.js'
-import { serializeIdentityRecord } from '../../core/identity.js'
-import { MetaPersistence } from '../../core/meta-persistence.js'
-import { SessionPersistence } from '../../core/session-persistence.js'
-import { QueuePersistence } from '../../core/queue-persistence.js'
-import { EventQueue } from '../../core/queue.js'
+import type { StoragePort, StorageRead } from '../../src/types/index.js'
+import { IdentityPersistence } from '../../src/core/storage/index.js'
+import { serializeIdentityRecord } from '../../src/core/userStore.js'
+import { MetaPersistence } from '../../src/core/storage/index.js'
+import { SessionPersistence } from '../../src/core/storage/index.js'
+import { QueuePersistence } from '../../src/core/storage/index.js'
+import { EventQueue } from '../../src/core/queue.js'
 
 function backend(read: StorageRead) {
   const write = vi.fn<StoragePort['write']>().mockResolvedValue({ kind: 'ok' })

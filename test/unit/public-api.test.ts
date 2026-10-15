@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import type { AppRuntimeHost } from '../../platform/app-runtime.js'
+import type { AppRuntimeHost } from '../../src/platform/index.js'
 
 describe('public API', () => {
   it('keeps build-time Vite integration out of the App runtime entry', async () => {

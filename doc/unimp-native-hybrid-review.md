@@ -25,7 +25,7 @@
 | R09 | P2 | 有 hello / dispatch 方法名但缺少精确关联字段、成功种类、非法应答和超时范围 | 补完整信封、方法白名单、ok / accepted / rejected / unknown、UTF-8 限额、错误分类、有限重连及样例 | 契约 3 / 8 / 9 / 10.1；T19–T21 |
 | R10 | P2 | gdp true 只表示排队，只有 debug 时能看到异步失败；握手后身份仍阻断又没有恢复通知 | 可选 onError；onReady 明确报告 collecting / identityBlocked / canWriteIdentity，阻断时也通知 | 契约 8.3；T04 / T09 / T33 |
 | R11 | P2 | 新建另一个 runtime 类却继续把它当 GioPluginRuntime；复用 App 平台预检查又强制依赖 storage/request | 保留 TrackerRuntime 门面和插件类型，内部委派；按模式装配依赖，列出现有方法在 unimp 的语义 | 总体 11.1；T01 / T32 |
-| R12 | P2 | 原计划放到顶层 hybrid 目录，当前发布白名单与构建 include 不收录 | 改为 core/unimp-protocol、runtime/unimp-hybrid 和 platform 文件；两渠道检查入口、类型、sourceHash | 总体 11.2；T31 |
+| R12 | P2 | 原计划放到顶层 hybrid 目录，当前发布白名单与构建 include 不收录 | 拟议模块随当前目录组织归入 src/core/dataStore、src/plugins/gioHybridAdapter 和 src/platform；两渠道检查入口、类型、sourceHash | 总体 11.2；T31 |
 | R13 | P2 | “销毁取消监听”没有区分页卸载、mixin 不可卸载及进程死亡 | Page.onUnload 只释放页；内部 dispose 使自有回调失效；原生独立清容器；只移除自有可移除监听 | 总体 11.1；契约 5 / 8.2；T27 / T34 |
 | R14 | P2 | 使用 Date.now 计算 TTL 时回拨延长缓存；要求 performance.now 又未证实 uniMP 一定可用 | 期限由可替换定时调度器和到期标记控制，事件时间另用墙上时钟；明确主线程冻结不是硬实时保证 | 契约 5.1；T19 / T22 |
 | R15 | P2 | 页面卸载后删掉所有关联状态，已排队 PAGE 的晚到应答可能找不到记录或误改新页面 | 页面交付记录与 PageStore 生命周期分离，按有界队列引用保留，应答按 pageViewId 更新 | 契约 6.2；T13 / T34 |
@@ -83,6 +83,6 @@
 
 ## 6. 本轮核对依据与实际交付边界
 
-本轮直接核对当前仓库 `index.ts` 的单例和插件类型、`core/config.ts` 的 App 配置、`core/tracker-event-gate.ts` 的启动重放、`core/page-store.ts` / `runtime/page-lifecycle.ts` 的显示时间、`runtime/uniapp-installer.ts` 的安装方式、`core/identity.ts` 与 `core/protocol.ts` 的值规范化、`runtime/autotrack-normalize.ts` 的文本与敏感规则，以及发布目录规则。兄弟 SDK 证据和官方链接汇总在总体设计第 2 / 3 节与详细契约第 12 节。
+本轮直接核对当前仓库 `index.ts` 的单例和插件类型、`src/constants/config.ts` 的 App 配置、`src/core/lifecycle.ts` 的启动重放、`src/core/dataStore/page.ts` / `src/core/dataStore/page.ts` 的显示时间、`src/adapters/uniapp.ts` 的安装方式、`src/core/userStore.ts` 与 `src/core/dataStore/protocol.ts` 的值规范化、`src/plugins/gioEventAutoTracking/index.ts` 的文本与敏感规则，以及发布目录规则。兄弟 SDK 证据和官方链接汇总在总体设计第 2 / 3 节与详细契约第 12 节。
 
 交付物是三份互相链接的设计文档及现有文档入口。验证仅包括设计推演、源码对照、Markdown 链接 / 示例 / 格式检查；36 条测试向量是后续实现的验收清单，不能记录为 36 条已通过测试。现有 `demo/manifest.json` 修改与本需求无关，保持原状。

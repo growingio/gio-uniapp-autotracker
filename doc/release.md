@@ -83,4 +83,4 @@ pnpm run release:prepare
 
 ## 验收记录
 
-构建与 mock collector 验证仅证明代码和受控链路。三端需要分别记录设备型号、系统/基座/SDK 版本、业务触发、真实请求及服务端收数；尤其核对宿主 dataset、picker 下标回退、标题更新、前后台与身份/会话边界。未取得证据的能力不能通过修改 `platform/capabilities.ts` 假装完成验收。
+构建与 mock collector 验证仅证明代码和受控链路。三端需要分别记录设备型号、系统/基座/SDK 版本、业务触发、真实请求及服务端收数；尤其核对宿主 dataset、picker 下标回退、标题更新、前后台与身份/会话边界。未取得证据的能力不能通过修改 `src/constants/platform.ts` 假装完成验收。

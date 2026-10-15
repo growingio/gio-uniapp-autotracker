@@ -5,8 +5,8 @@ import { parse as parseSfc } from '@vue/compiler-sfc'
 import { nextTick } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
-import { gioUniappAutoTrack } from '../../autotrack/vite.js'
-import { normalizeAutoTrackCall } from '../../runtime/autotrack-normalize.js'
+import { gioUniappAutoTrack } from '../../src/compiler/vite.js'
+import { normalizeAutoTrackCall } from '../../src/plugins/gioEventAutoTracking/index.js'
 import { mountAutoTrackSfc } from '../support/autotrack-fixture.js'
 
 const pagePath = resolve(import.meta.dirname, '../../demo/pages/autotrack/autotrack.vue')

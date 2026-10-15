@@ -1,4 +1,4 @@
-import type { AutoTrackCall, NormalizedAutoTrackCall } from '../../demo/uni_modules/gio-uniapp-autotracker/autotrack/contract.js'
+import type { AutoTrackCall, NormalizedAutoTrackCall } from '../../demo/uni_modules/gio-uniapp-autotracker/src/plugins/gioEventAutoTracking/contract.js'
 
 const template: AutoTrackCall = { schemaVersion: 2, source: 'template', kind: 'change', eventName: 'save', elementType: 'input' }
 const tabbar: AutoTrackCall = { schemaVersion: 2, source: 'tabbar', kind: 'click', xpath: '#onTabItemTap', index: 1 }

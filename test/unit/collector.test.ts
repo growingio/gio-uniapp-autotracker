@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import { buildCollectorRequest, isRetryableCollectorFailure, normalizeCollectorResult } from '../../core/collector.js'
-import type { ProtocolEvent } from '../../core/protocol.js'
+import { buildCollectorRequest, isRetryableCollectorFailure, normalizeCollectorResult } from '../../src/core/uploader.js'
+import type { ProtocolEvent } from '../../src/core/dataStore/protocol.js'
 
 const event = { eventType: 'VISIT', deviceId: 'visitor' } as ProtocolEvent
 

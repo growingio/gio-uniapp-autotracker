@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { BuiltinPluginRegistry } from '../../core/plugin-registry.js'
+import { BuiltinPluginRegistry } from '../../src/core/lifecycle.js'
 
 describe('BuiltinPluginRegistry', () => {
   it('retains declaration order without running plugin code', () => {

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { createAppTracker } from '../../platform/app-runtime.js'
-import { dispatchAutoTrack } from '../../runtime/autotrack-dispatch.js'
+import { createAppTracker } from '../../src/platform/index.js'
+import { dispatchAutoTrack } from '../../src/plugins/gioEventAutoTracking/index.js'
 
 describe('createAppTracker', () => {
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })

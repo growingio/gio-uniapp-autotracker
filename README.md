@@ -14,6 +14,8 @@
 
 仓库根目录就是 SDK 包根目录。`uni_modules/gio-uniapp-autotracker` 仅是使用方工程或发布压缩包中的安装位置，不在本仓库内再嵌套一层。
 
+源码集中在 `src/`，沿用 Web / 小程序 SDK 的领域组织：`core/growingIO.ts` 协调运行时，`core/userStore.ts` 管理身份与会话，`core/dataStore/` 管理事件和页面，`core/storage/` 管理持久化；`plugins/`、`adapters/`、`platform/`、`compiler/` 分别放运行时插件、框架接入、宿主能力和编译插桩。根目录的 `index.ts`、`autotrack.ts`、`vite.ts` 是三个公开入口，完整目录及依赖边界见[架构文档](./doc/uniapp-sdk-development.md#4-工程结构与依赖方向)。
+
 ## Vue 3 / App 接入
 
 选择一种安装方式，同一个应用不要同时加载两份 SDK：
@@ -89,7 +91,7 @@ export default defineConfig(async () => {
 
 自动测试与 HBuilderX 编译检查不等于三端真机验收。Android、iOS、HarmonyOS 的设备请求和服务端接收证据仍须在正式发布前补齐，验收边界见[无埋点发布说明](./doc/autotrack-v2-release.md)。
 
-`platform/capabilities.ts` 的能力表同时参与无埋点运行时门控。当前三端 `autoClick`、`tabBar` 和逐组件 `autoChange` 全部为 `false`，因此默认不发送模板或 tabBar 的 `VIEW_*`。待对应端的编译版本、真机请求和 collector 接收记录归档后，再逐项开放；单元测试使用内部受控宿主配置；demo 通过专用构建常量 `__GIO_AUTOTRACK_VERIFICATION__` 显式开放待验收链路，便于实机验证。验证开关不会改变生产验收状态，正式应用不要复制。
+`src/constants/platform.ts` 的能力表同时参与无埋点运行时门控。当前三端 `autoClick`、`tabBar` 和逐组件 `autoChange` 全部为 `false`，因此默认不发送模板或 tabBar 的 `VIEW_*`。待对应端的编译版本、真机请求和 collector 接收记录归档后，再逐项开放；单元测试使用内部受控宿主配置；demo 通过专用构建常量 `__GIO_AUTOTRACK_VERIFICATION__` 显式开放待验收链路，便于实机验证。验证开关不会改变生产验收状态，正式应用不要复制。
 
 `debug: true` 只在本地输出 `[GrowingIO Debug]:` 的操作标签与即将派发的协议事件数组；不会输出队列内部元数据，也不会改变隐私、重试或采集行为。
 

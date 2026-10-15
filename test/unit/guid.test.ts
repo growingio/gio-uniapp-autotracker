@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { guid } from '../../core/guid.js'
+import { guid } from '../../src/utils/tools.js'
 
 describe('guid', () => {
   it('generates the mini-program SDK UUID v4 format', () => {

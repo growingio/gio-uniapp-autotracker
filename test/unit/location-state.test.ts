@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { LocationState } from '../../core/location-state.js'
+import { LocationState } from '../../src/core/userStore.js'
 
 describe('LocationState', () => {
   it('accepts the inclusive geographic boundaries including zero', () => {

@@ -5,7 +5,7 @@ import {
   readIdentityRecord,
   serializeIdentityRecord,
   updateIdentity,
-} from '../../core/identity.js'
+} from '../../src/core/userStore.js'
 
 const anonymous = { deviceId: 'visitor-1', userId: null, userKey: null } as const
 

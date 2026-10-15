@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { buildAppEvent, normalizeAttributes, sanitizeOutboundEvent } from '../../core/protocol.js'
+import { buildAppEvent, normalizeAttributes, sanitizeOutboundEvent } from '../../src/core/dataStore/protocol.js'
 
 const context = {
   deviceId: 'device', sessionId: 'session', dataSourceId: 'source', platform: 'Android',

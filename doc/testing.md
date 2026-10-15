@@ -42,7 +42,7 @@ pnpm run release:prepare
 
 ## 覆盖率与报告
 
-覆盖范围包括 `index.ts`、`autotrack.ts`、`vite.ts` 和 `core/`、`runtime/`、`platform/`、`autotrack/` 中的全部源码，即使文件没有被测试导入也计入。只有纯类型声明文件 `core/ports.ts` 由 TypeScript 检查替代运行时覆盖率。
+覆盖范围包括 `index.ts`、`autotrack.ts`、`vite.ts` 和 `src/` 中的全部源码，即使文件没有被测试导入也计入。只有纯类型声明文件 `src/types/index.ts` 由 TypeScript 检查替代运行时覆盖率。
 
 每个文件必须达到：行与语句覆盖率 90%、函数覆盖率 85%、分支覆盖率 80%。任一文件不达标就返回非零退出码。配置与阈值使用 [Vitest 3 覆盖率能力](https://v3.vitest.dev/config/#coverage)。覆盖率是防遗漏门槛，不能代替上表中的业务行为断言。
 

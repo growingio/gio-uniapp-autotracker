@@ -5,13 +5,15 @@ import { execFileSync } from 'node:child_process'
 import { build } from 'esbuild'
 import { dist, hashes, metadata, modulesDir, npmDir, root, runtimeEntries, sdkName, sourceHash } from './release-layout.js'
 
-// 只清理固定生成目录；开发源码始终位于仓库根目录。
+// 只清理固定生成目录；公开入口和 src 中的开发源码不受影响。
 for (const output of [join(dist, 'build'), npmDir, modulesDir]) await rm(output, { recursive: true, force: true })
 execFileSync(process.execPath, [join(root, 'node_modules/typescript/bin/tsc'), '-p', 'tsconfig.build.json'], { cwd: root, stdio: 'inherit' })
 await mkdir(npmDir, { recursive: true })
 for (const entry of runtimeEntries) await cp(join(dist, 'build', entry), join(npmDir, entry), { recursive: true })
-await mkdir(join(npmDir, 'autotrack'), { recursive: true })
-for (const entry of ['contract.js', 'contract.d.ts', 'vite.d.ts']) await cp(join(dist, 'build/autotrack', entry), join(npmDir, 'autotrack', entry))
+// 编译器只交付其公开声明和独立 bundle，App 运行时代码保留 src 中的领域目录。
+await rm(join(npmDir, 'src/compiler'), { recursive: true, force: true })
+await mkdir(join(npmDir, 'src/compiler'), { recursive: true })
+await cp(join(dist, 'build/src/compiler/vite.d.ts'), join(npmDir, 'src/compiler/vite.d.ts'))
 await cp(join(dist, 'build/vite.d.ts'), join(npmDir, 'vite.d.ts'))
 
 const bundled = await build({
@@ -49,7 +51,7 @@ const packageJson = {
     const name = entry === '.' ? 'index' : entry.slice(2)
     return [entry, { types: `./${name}.d.ts`, import: `./${name}.js` }]
   })),
-  files: ['*.js', '*.d.ts', 'core', 'runtime', 'platform', 'autotrack', 'doc', 'README.md', 'LICENSE', 'THIRD_PARTY_LICENSES.txt'],
+  files: ['*.js', '*.d.ts', 'src', 'doc', 'README.md', 'LICENSE', 'THIRD_PARTY_LICENSES.txt'],
   publishConfig: { registry: 'https://registry.npmjs.org/', access: 'public' },
 }
 await writeFile(join(npmDir, 'package.json'), `${JSON.stringify(packageJson, null, 2)}\n`)

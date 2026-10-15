@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { mountAutoTrackSfc } from '../support/autotrack-fixture.js'
-import { transformAutoTrackSfc } from '../../autotrack/vite.js'
+import { transformAutoTrackSfc } from '../../src/compiler/vite.js'
 
 describe('无埋点不得改变 Vue listener 的业务语义', () => {
   it('keeps the dispatcher distinct from escaped v-for aliases', () => {

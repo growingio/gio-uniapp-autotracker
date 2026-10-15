@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { appEntrySnapshot, createAppLifecycleBridge } from '../../runtime/app-bridge.js'
+import { appEntrySnapshot, createAppLifecycleBridge } from '../../src/adapters/uniapp.js'
 
 describe('appEntrySnapshot', () => {
   it('preserves an existing query string and turns documented scalar query objects into an encoded snapshot', () => {

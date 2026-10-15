@@ -34,11 +34,11 @@ DCloud 将 uni 小程序定义为运行在宿主中的 uni-app 前端资源；�
 
 | 仓库与 HEAD | 关键文件 | 对设计的影响 |
 |---|---|---|
-| 本仓库 `33257a1` | `index.ts`、`platform/app-runtime.ts` | 根入口只创建 App runtime，默认安装存储、网络、HTTP 请求适配器 |
-| 本仓库 | `platform/app-system-context.ts`、`core/ports.ts` | 系统模型只包含 Android / iOS / HarmonyOS；`domain` 按宿主包名读取，不能区分多个 uni 小程序 |
-| 本仓库 | `core/event-composer.ts`、`runtime/tracker.ts` | 事件依赖本地 identity、session、sequence 和 queue；只换 TransportPort 仍会创建第二套身份与访问 |
-| 本仓库 | `runtime/app-lifecycle.ts`、`runtime/page-lifecycle.ts` | App 生命周期产生 VISIT / APP_CLOSED，Page 生命周期管理页面与 PAGE，需要按运行模式分配职责 |
-| 本仓库 | `core/plugin-registry.ts`、`platform/capabilities.ts` | 内置插件只有 `gioEventAutoTracking`；现有自动采集能力尚有真机验收门控 |
+| 本仓库 `33257a1` | `index.ts`、`src/platform/index.ts` | 根入口只创建 App runtime，默认安装存储、网络、HTTP 请求适配器 |
+| 本仓库 | `src/platform/system.ts`、`src/types/index.ts` | 系统模型只包含 Android / iOS / HarmonyOS；`domain` 按宿主包名读取，不能区分多个 uni 小程序 |
+| 本仓库 | `src/core/dataStore/index.ts`、`src/core/growingIO.ts` | 事件依赖本地 identity、session、sequence 和 queue；只换 TransportPort 仍会创建第二套身份与访问 |
+| 本仓库 | `src/core/dataStore/app.ts`、`src/core/dataStore/page.ts` | App 生命周期产生 VISIT / APP_CLOSED，Page 生命周期管理页面与 PAGE，需要按运行模式分配职责 |
+| 本仓库 | `src/core/lifecycle.ts`、`src/constants/platform.ts` | 内置插件只有 `gioEventAutoTracking`；现有自动采集能力尚有真机验收门控 |
 | Web SDK `8e54d43` | `src/plugins/gioHybridAdapter/index.ts`、`payload.ts`、`src/core/uploader.ts` | 匹配的实例通过 Native 单发；原生配置、身份命令、事件发送和 DOM 圈选分别处理 |
 | 小程序 SDK `9c3f601` | `src/core/dataStore/eventHooks/appEffects.ts`、`minipPage.ts`、`eventContextBuilder.ts` | 页面参数和入口参数分开；`domain=appId`，有 scene / keepAlive / 页面补发语义 |
 | 小程序 SDK | `src/core/userStore.ts`、`src/core/growingIO.ts#getGioInfo` | session 在内存；`getGioInfo` 是给内嵌 Web 的参数串，不是原生事件接收协议 |
@@ -48,7 +48,7 @@ DCloud 将 uni 小程序定义为运行在宿主中的 uni-app 前端资源；�
 
 iOS 当前检出源码未找到与 Android 对称的 `getNativeIdentity` 实现。不能从 Web 支持 Promise 的代码，反推当前 iOS SDK 已提供该方法。
 
-主要源码入口：[当前 App runtime](../platform/app-runtime.ts)、[当前事件构建](../core/event-composer.ts)、[Web Hybrid](/Users/anoiv/Workspace/gio-web-autotracker/src/plugins/gioHybridAdapter/index.ts)、[小程序生命周期](/Users/anoiv/Workspace/gio-miniprogram-autotracker/src/core/dataStore/eventHooks/appEffects.ts)、[Android 事件入口](/Users/anoiv/Workspace/growingio-sdk-android-autotracker/growingio-hybrid/src/main/java/com/growingio/android/hybrid/NativeBridge.java)、[Android 公共字段](/Users/anoiv/Workspace/growingio-sdk-android-autotracker/growingio-tracker-core/src/main/java/com/growingio/android/sdk/track/events/base/BaseEvent.java)、[iOS 事件入口](/Users/anoiv/Workspace/growingio-sdk-ios-autotracker/Modules/Hybrid/GrowingHybridBridgeProvider.m)。兄弟仓库链接对应本机本次检出的源码。
+主要源码入口：[当前 App runtime](../src/platform/index.ts)、[当前事件构建](../src/core/dataStore/index.ts)、[Web Hybrid](/Users/anoiv/Workspace/gio-web-autotracker/src/plugins/gioHybridAdapter/index.ts)、[小程序生命周期](/Users/anoiv/Workspace/gio-miniprogram-autotracker/src/core/dataStore/eventHooks/appEffects.ts)、[Android 事件入口](/Users/anoiv/Workspace/growingio-sdk-android-autotracker/growingio-hybrid/src/main/java/com/growingio/android/hybrid/NativeBridge.java)、[Android 公共字段](/Users/anoiv/Workspace/growingio-sdk-android-autotracker/growingio-tracker-core/src/main/java/com/growingio/android/sdk/track/events/base/BaseEvent.java)、[iOS 事件入口](/Users/anoiv/Workspace/growingio-sdk-ios-autotracker/Modules/Hybrid/GrowingHybridBridgeProvider.m)。兄弟仓库链接对应本机本次检出的源码。
 
 ### 当前仓库必须先具备什么
 
@@ -328,19 +328,19 @@ Android / iOS 原生侧后续交付 `GrowingIOUniMPBridge` module 或提供与�
 
 ## 11. 工程落点与实施顺序
 
-保持仓库根目录的扁平布局，新增文件只承担已经明确的职责：
+沿用当前 `src/` 的领域目录，新增文件只承担已经明确的职责；下表新增模块仍为拟议内容：
 
 | 位置（拟议） | 工作 |
 |---|---|
-| `index.ts`、`core/config.ts`、`core/plugin-registry.ts` | 增加 runtime / appId / Hybrid 插件契约，先决定模式再创建依赖 |
-| `core/ports.ts`、`core/unimp-protocol.ts` | 增加内部 EventOutput / 宿主请求接口与协议校验，保留现有 HTTP TransportPort 职责 |
-| `core/protocol.ts` | 复用纯属性和字段校验；新增草稿白名单，不能放松独立 App 报文必填检查 |
-| `runtime/page-lifecycle.ts`、`runtime/event-dispatcher.ts` | 依赖最小事件输出接口，保留共用页面与行为构建；不硬依赖 App composer |
-| `runtime/tracker.ts`、`platform/app-runtime.ts` | 保持 App 生命周期、持久化和 HTTP 逻辑；抽取真正共用部分供托管 runtime 使用 |
-| `runtime/unimp-runtime.ts` | 装配页面 / 行为链，替换 App session 及生命周期职责，协调托管门禁 |
-| `platform/unimp-runtime.ts`、`platform/unimp-native-module.ts` | 读取 uni 的客体元信息、加载约定 module、构造宿主端口 |
-| `runtime/unimp-hybrid.ts` | 握手、FIFO、超时、代次隔离、页面依赖、身份阻断和诊断；不新增发布白名单以外的 hybrid 顶层目录 |
-| `platform/capabilities.ts` | 以运行模式与系统选择已验收能力 |
+| `index.ts`、`src/constants/config.ts`、`src/core/lifecycle.ts` | 增加 runtime / appId / Hybrid 插件契约，先决定模式再创建依赖 |
+| `src/types/index.ts`、`src/core/dataStore/unimp.ts` | 增加内部 EventOutput / 宿主请求接口与协议校验，保留现有 HTTP TransportPort 职责 |
+| `src/core/dataStore/protocol.ts` | 复用纯属性和字段校验；新增草稿白名单，不能放松独立 App 报文必填检查 |
+| `src/core/dataStore/page.ts`、`src/core/dataStore/index.ts` | 依赖最小事件输出接口，保留共用页面与行为构建；不硬依赖 App composer |
+| `src/core/growingIO.ts`、`src/platform/index.ts` | 保持 App 生命周期、持久化和 HTTP 逻辑；抽取真正共用部分供托管 runtime 使用 |
+| `src/core/unimp.ts` | 装配页面 / 行为链，替换 App session 及生命周期职责，协调托管门禁 |
+| `src/platform/unimp.ts`、`src/platform/unimpNativeModule.ts` | 读取 uni 的客体元信息、加载约定 module、构造宿主端口 |
+| `src/plugins/gioHybridAdapter/index.ts` | 握手、FIFO、超时、代次隔离、页面依赖、身份阻断和诊断；沿用 src 中的插件交付目录 |
+| `src/constants/platform.ts` | 以运行模式与系统选择已验收能力 |
 | `test/contracts`、`test/unit`、`test/integration` | 按统一 module 契约验证请求、应答、故障和编译产物；mock 仅存在于测试路径 |
 | `demo` 与后续 Native 示例工程 | 同一客体产出 wgt；原生完成后接入真实 module 验证 |
 

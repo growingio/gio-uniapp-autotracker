@@ -4,7 +4,7 @@ import {
   GIO_IDENTITY_CIPHER_PREFIX,
   decryptIdentityValue,
   encryptIdentityValue,
-} from '../../core/identity-codec.js'
+} from '../../src/core/storage/encrypt.js'
 
 describe('identity xor-utf8-v1 codec', () => {
   it.each(['', 'plain text', '中文身份', 'emoji 😀 and 𐐷'])('round-trips %j without a host codec', (value) => {

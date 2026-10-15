@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { BootstrapBuffer } from '../../core/bootstrap-buffer.js'
+import { BootstrapBuffer } from '../../src/core/lifecycle.js'
 
 describe('BootstrapBuffer', () => {
   it.each(['é', '中文', '😀', '\ud800'])('按实际 UTF-8 字节数限制 %s，包含 JSON 数组开销', (text) => {

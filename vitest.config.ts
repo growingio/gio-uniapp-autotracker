@@ -10,9 +10,9 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       all: true,
-      include: ['index.ts', 'autotrack.ts', 'vite.ts', 'core/**/*.ts', 'runtime/**/*.ts', 'platform/**/*.ts', 'autotrack/**/*.ts'],
-      // ports 仅声明类型，由 typecheck 检查；其余核心文件包括未被测试导入的文件全部计入。
-      exclude: [...coverageConfigDefaults.exclude, 'core/ports.ts'],
+      include: ['index.ts', 'autotrack.ts', 'vite.ts', 'src/**/*.ts'],
+      // types 仅声明端口类型，由 typecheck 检查；其余源码包括未被测试导入的文件全部计入。
+      exclude: [...coverageConfigDefaults.exclude, 'src/types/index.ts'],
       reporter: ['text', 'html', 'json', 'json-summary'],
       reportsDirectory: 'coverage',
       reportOnFailure: true,

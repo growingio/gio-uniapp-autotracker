@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
-import { TrackerEventGate } from '../../core/tracker-event-gate.js'
-import { TrackerLifecycle } from '../../core/tracker-lifecycle.js'
-import { BootstrapBuffer } from '../../core/bootstrap-buffer.js'
+import { TrackerEventGate } from '../../src/core/lifecycle.js'
+import { TrackerLifecycle } from '../../src/core/lifecycle.js'
+import { BootstrapBuffer } from '../../src/core/lifecycle.js'
 
 const options = { accountId: 'account', dataSourceId: 'source' }
 

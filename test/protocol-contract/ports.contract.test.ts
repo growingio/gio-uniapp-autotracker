@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import type { AppSystemContext, ClockPort, StoragePort, SystemContextPort, TimezonePort, TransportPort } from '../../core/ports.js'
+import type { AppSystemContext, ClockPort, StoragePort, SystemContextPort, TimezonePort, TransportPort } from '../../src/types/index.js'
 
 describe('阶段 0 ports contract', () => {
   it('keeps stable system context separate from per-event clock and timezone reads', async () => {

@@ -182,7 +182,7 @@ path / xpath 是非空字符串，query / title / referralPage 是字符串；�
 
 `pageViewId` 放在 dispatchEvent.payload 中，不放到 event 中，不进入 collector；长度 1–128 个 ASCII 字符，使用运行期随机标识和递增计数构成，内部再关联 pageKey。它不是根据 timestamp 算出的 hash。PAGE.timestamp、关联行为.pageShowTimestamp、path、query 必须与该 pageViewId 记录一致。
 
-属性归一化直接复用当前 core/protocol.ts 的纯规则：键截至 100 个 Unicode 字符、值截至 1000 个；有限数值 / boolean 转字符串，合法 Date 转 ISO；数组最多 100 项且元素须可归一化，以 `||` 拼接；嵌套对象或非法值按现有规则丢弃该属性；截断后键冲突保留首次值并诊断。Native 只接收已归一化的 string-to-string 对象，不再自行换分隔符或做第二次截断。空属性串、字符串 `"false"` 和 `"0"` 遵守现有属性语义，不当作 false / 0 删除；整体为空的 CUSTOM.attributes 省略，空用户属性调用 false。
+属性归一化直接复用当前 src/core/dataStore/protocol.ts 的纯规则：键截至 100 个 Unicode 字符、值截至 1000 个；有限数值 / boolean 转字符串，合法 Date 转 ISO；数组最多 100 项且元素须可归一化，以 `||` 拼接；嵌套对象或非法值按现有规则丢弃该属性；截断后键冲突保留首次值并诊断。Native 只接收已归一化的 string-to-string 对象，不再自行换分隔符或做第二次截断。空属性串、字符串 `"false"` 和 `"0"` 遵守现有属性语义，不当作 false / 0 删除；整体为空的 CUSTOM.attributes 省略，空用户属性调用 false。
 
 自动采集继续复用 schema v2 的精确标识、敏感过滤与文本规范化；textValue / hyperlink 沿用当前去控制字符、trim、100 个 UTF-16 code unit 的上限，不在本功能中悄悄改成另一套 Unicode 截断。index 是满足 `1 <= index < 2147483647` 的整数；tabBar 在原有边界转换为一基序号。桥层接收归一化草稿，不接收 dataset、pickerRange、原始 nativeEvent 或 getter。
 
@@ -432,7 +432,7 @@ duplicate_request 对本 SDK 是异常：从不重投业务请求，正常不应
 | T28 | Native 上传离线 / 重试 / 重启 | Native 独占重试；原事件身份不变；JS 无持久化副本 | Native + 服务端 |
 | T29 | PAGE / CUSTOM / VIEW / 用户属性的 JSON 与 Protobuf | 时间、domain、页面关联、序号和字段均正确 | Native + Collector |
 | T30 | domain=客体 appId、platform=Android/iOS，两个客体同 path | 服务端页面归档 / 查询正确，区分两客体 | 服务端产品 |
-| T31 | npm / uni_modules 生成包与 wgt | 新 core/runtime/platform 文件和类型齐全，mock 不在产物 | JS 发布 + 构建 |
+| T31 | npm / uni_modules 生成包与 wgt | 新 src/core、src/plugins、src/platform 文件和类型齐全，mock 不在产物 | JS 发布 + 构建 |
 | T32 | 原 App 初始化、插件、身份、启动重放与 HTTP 路径 | 原有 App 契约保持；unimp 不借用 App 缓存重放 | JS 回归 |
 | T33 | onError 抛错、onReady 抛错，回调触发新的 API | 无递归错误回调、无状态重入和身份 / 属性日志泄漏 | JS |
 | T34 | 超大入口、超长 path、销毁后标题回调、旧页探针 | 元信息有界，当前页关联明确，只清自有资源 | JS + 设备 |
@@ -524,4 +524,4 @@ JS 完成标志是上述 JS 用例和适当回归 / 构建通过，可继续开�
 
 该契约的消息格式是本项目设计。DCloud 提供的是承载能力：[iOS module 调用](https://nativesupport.dcloud.net.cn/UniMPDocs/Extension/ios.html#_4-在-uni小程序-中调用-module-方法)、[Android V2 API](https://nativesupport.dcloud.net.cn/UniMPDocs/API/android-v2.html)、[Android 集成与进程说明](https://nativesupport.dcloud.net.cn/UniMPDocs/UseSdk/android.html)。未来宿主通道参考 [uni-unimp 插件](https://ext.dcloud.net.cn/plugin?id=17638) 与 [Host API](https://nativesupport.dcloud.net.cn/UniMPDocs/UniappHost/unimpapi.html)，实际版本兼容性届时重核。
 
-本地复用边界来自 [入口与插件类型](../index.ts)、[身份语义](../core/identity.ts)、[属性和 App 协议](../core/protocol.ts)、[页面状态](../core/page-store.ts)、[现有启动重放](../core/tracker-event-gate.ts)、[自动采集规范化](../runtime/autotrack-normalize.ts)、[发布目录规则](../scripts/release-layout.ts)。兄弟 SDK 的现场版本与证据见总体设计第 2 节。
+本地复用边界来自 [入口与插件类型](../index.ts)、[身份语义](../src/core/userStore.ts)、[属性和 App 协议](../src/core/dataStore/protocol.ts)、[页面状态](../src/core/dataStore/page.ts)、[现有启动重放](../src/core/lifecycle.ts)、[自动采集规范化](../src/plugins/gioEventAutoTracking/index.ts)、[发布目录规则](../scripts/release-layout.ts)。兄弟 SDK 的现场版本与证据见总体设计第 2 节。

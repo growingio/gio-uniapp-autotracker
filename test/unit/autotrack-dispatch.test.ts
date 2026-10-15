@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { AutoTrackDispatcher, dispatchAutoTrack, installAutoTrackDispatcher } from '../../runtime/autotrack-dispatch.js'
+import { AutoTrackDispatcher, dispatchAutoTrack, installAutoTrackDispatcher } from '../../src/plugins/gioEventAutoTracking/index.js'
 
 const click = { schemaVersion: 2, source: 'template', kind: 'click', eventName: 'save' } as const
 const event = (timeStamp: unknown = 10, id = 'buy', type = 'tap') => ({ type, timeStamp, currentTarget: { id, dataset: { title: 'Buy' } } })

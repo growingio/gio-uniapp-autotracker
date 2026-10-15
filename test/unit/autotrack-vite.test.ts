@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { defineComponent, h, nextTick } from 'vue'
 import { NodeTypes, parse } from '@vue/compiler-dom'
-import { gioUniappAutoTrack, transformAutoTrackSfc, transformAutoTrackTemplate } from '../../autotrack/vite.js'
+import { gioUniappAutoTrack, transformAutoTrackSfc, transformAutoTrackTemplate } from '../../src/compiler/vite.js'
 import { mountAutoTrackSfc } from '../support/autotrack-fixture.js'
-import { normalizeAutoTrackCall } from '../../runtime/autotrack-normalize.js'
+import { normalizeAutoTrackCall } from '../../src/plugins/gioEventAutoTracking/index.js'
 
 function handlers(code: string): string[] {
   const result: string[] = []

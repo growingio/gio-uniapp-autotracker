@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import { EventQueue } from '../../core/queue.js'
-import type { ProtocolEvent } from '../../core/protocol.js'
+import { EventQueue } from '../../src/core/queue.js'
+import type { ProtocolEvent } from '../../src/core/dataStore/protocol.js'
 
 function event(number: number, value = ''): ProtocolEvent {
   return { eventType: 'CUSTOM', eventSequenceId: number, eventName: `event_${number}`, value } as ProtocolEvent

@@ -1,4 +1,3 @@
-found=23856 bad=1
 # 传统 uni-app App 数据采集 SDK 开发文档
 
 > **文档状态：开发设计基线**
@@ -119,60 +118,52 @@ found=23856 bad=1
 
 ```text
 gio-uniapp-autotracker/
-├── package.json
-├── index.ts                        # 对外 API；不含 Vue 或 UTS 细节
-├── vite.ts                         # 对外 Vite 插件入口
-├── core/
-│   ├── tracker.ts                  # 编排：初始化、session、事件派发
-│   ├── config.ts                   # 显式配置归一化和校验
-│   ├── protocol.ts                 # Measurement Protocol 字段裁剪与校验
-│   ├── event-builder.ts            # 事件构建、编码与长度限制
-│   ├── identity-cipher.ts           # 全端统一的身份字段 XOR 保护
-│   ├── identity.ts                 # visitor/user/userKey 与持久化迁移
-│   ├── session.ts                  # session、lastCloseTime、eventSequenceId
-│   ├── page-store.ts               # 页面快照和 referral
-│   ├── location-state.ts           # 仅内存的业务位置状态
-│   ├── queue.ts                    # 内存 + 持久化队列
-│   ├── uploader.ts                 # 批量、超时、重试、finalizer
-│   ├── plugins.ts                  # 插件注册与能力开关
-│   └── ports.ts                    # storage/request/system/network 等端口
-├── runtime/
-│   ├── install.ts                  # 安装到传统 uni-app Vue3
-│   ├── app-lifecycle.ts            # App.vue 委托入口
-│   ├── page-lifecycle.ts           # page snapshot / PAGE 事件
-│   ├── page-snapshot.ts            # 只输出纯 JSON
-│   ├── orientation.ts              # PAGE 专用方向读取与 PORTRAIT 兜底
-│   └── autotrack-dispatch.ts       # 模板插桩调用的稳定协议
-├── autotrack/
-│   ├── contract.ts                 # 插桩器与 runtime 的唯一契约
-│   ├── plugin.ts                   # gioEventAutoTracking 正式运行时插件
-│   ├── normalizer.ts               # click/change 事件归一化
-│   ├── privacy.ts                  # 忽略、白名单、脱敏
-│   ├── dedupe.ts                   # 事件去重
-│   └── vue3-vite.ts                # Vue SFC template AST 改写
-├── platform/
-│   ├── uni.ts                      # uni system / network / scheduler
-│   ├── app-storage.ts              # 一期：uni storage → state / queue 存储端口
-│   ├── web-storage.ts              # 二期：localStorage state + memory queue
-│   ├── miniprogram-storage.ts      # 二期：wx/my/tt 等 → 存储端口
-│   ├── app-request.ts              # 一期：uni.request → 标准请求结果
-│   ├── web-request.ts              # 二期：fetch / XHR → 标准请求结果
-│   ├── miniprogram-request.ts      # 二期：wx/my/tt 等 → 标准请求结果
-│   ├── app.ts                      # 统一 App profile
-│   ├── android.ts                  # Android capability
-│   ├── ios.ts                      # iOS capability
-│   └── harmony.ts                  # HarmonyOS capability
-├── demo/                            # 三端真机验收唯一 demo
-├── test/
-│   ├── unit/
-│   ├── integration/
-│   ├── compiler-fixtures/
-│   └── protocol-contract/
-├── scripts/
+├── index.ts                         # gdp 公开 API 与类型
+├── autotrack.ts                     # 编译探针的运行时公开入口
+├── vite.ts                          # Vite 插件公开入口
+├── src/
+│   ├── constants/
+│   │   ├── config.ts                # 初始化配置、SDK 版本
+│   │   └── platform.ts              # 平台验收能力表与验证构建配置
+│   ├── core/
+│   │   ├── growingIO.ts             # TrackerRuntime：装配与事件调度
+│   │   ├── lifecycle.ts             # 插件注册、初始化状态、暂存和按序回放
+│   │   ├── userStore.ts             # 设备/登录身份、会话、内存位置
+│   │   ├── dataStore/
+│   │   │   ├── index.ts            # 事件序号、EventComposer、EventDispatcher
+│   │   │   ├── protocol.ts         # 唯一协议裁剪、属性归一化和字段验证
+│   │   │   ├── app.ts              # App 生命周期、VISIT、APP_CLOSED
+│   │   │   └── page.ts             # 页面快照、来源、方向和 PAGE
+│   │   ├── storage/
+│   │   │   ├── index.ts            # 命名空间、身份/会话/序号/队列持久化
+│   │   │   └── encrypt.ts          # 身份字段编码与解码
+│   │   ├── queue.ts                 # 有界队列、批次和请求占用
+│   │   └── uploader.ts              # 请求构建、超时结算、并发和重试
+│   ├── adapters/
+│   │   └── uniapp.ts                # Vue mixin、App/Page bridge、query 快照
+│   ├── platform/
+│   │   ├── index.ts                 # 从 uni 宿主装配运行时
+│   │   ├── uni.ts                   # uni storage / request 适配
+│   │   ├── system.ts                # 系统、设备、应用上下文
+│   │   └── network.ts               # 网络查询、通知和连接状态
+│   ├── plugins/
+│   │   └── gioEventAutoTracking/
+│   │       ├── index.ts             # 隐私、值归一化、去重和 dispatcher
+│   │       └── contract.ts          # 编译器与运行时共享的 schema v2
+│   ├── compiler/
+│   │   ├── vite.ts                  # Vue SFC/template 插桩
+│   │   └── handler.ts               # listener AST 分析与改写
+│   ├── types/
+│   │   └── index.ts                 # 系统、存储、网络、传输等端口类型
+│   └── utils/
+│       └── tools.ts                 # UUID、collector hostname 规范化
+├── demo/                            # 使用编译交付包的验收工程
+├── test/                            # 单元、协议、集成及消费者类型测试
+├── scripts/                         # 构建、打包、交付验证和发布
 └── doc/
 ```
 
-这就是一期实际创建的目录；二期原生增强获批后才新增 `native/` 与 `utssdk/`。依赖只能由外向内：`autotrack` 和 `runtime` 可以调用 `core`；`core` 不得 import Vue、Vite、`uni` 页面实例或 UTS 对象。`platform`（以及二期 `native`）实现 `core/ports.ts`，不定义事件字段。这样 Vue2/Webpack 二期只需新增 `autotrack/vue2-webpack`，不用改事件协议、上传和身份。
+以上目录与当前实现一致，参考 Web / 小程序 SDK 的 `core/dataStore`、`core/storage`、`plugins` 和 `adapters` 分区；关联小模块在领域文件内维护，共享独立协议保留单独文件。二期原生增强获批后再新增相应目录。依赖以领域逻辑和宿主接口分离：`src/core` 不直接调用 Vue、Vite、`uni` 页面实例或 UTS 对象；`src/platform` 实现 `src/types/index.ts` 并装配运行时，`src/adapters` 负责 Vue 生命周期，`src/compiler` 只处理编译插桩，`src/plugins/gioEventAutoTracking` 只处理运行时探针。编译器和运行时仅共享 contract；未来 Vue2/Webpack 适配器放在 `src/compiler`，复用现有事件协议、上传和身份。
 
 ---
 
@@ -277,7 +268,7 @@ export const gdp: GdpCommand
 
 `gdp()` 与小程序 SDK 使用同一命令式接入形态：先注册插件，再初始化。业务侧只传账户、数据源、采集配置和 `createSSRApp(App)` 得到的 `uniVue`。SDK 自己读取全局 `uni`、创建内部 tracker 与全局 Vue mixin；业务 `App.vue` 和页面不必引入 bridge。`deviceId` 由 SDK 首次启动生成并以 SDK storage namespace 持久化；`sessionId` 也由 SDK 自己按首次访问、超时、用户切换和恢复采集等会话边界创建。宿主对象、device/session ID 工厂都是内部依赖，绝不要求客户传入。
 
-`core/config.ts` 是唯一允许读取 `GioInitOptions` 的位置：`accountId`、`dataSourceId` 必须是非空且 UTF-16 合法的字符串，拒绝未配对代理字符，保留合法中文与 emoji；`serverUrl` 未传时固定补为 `https://napi.growingio.com`，传入时 trim、仅域名自动补 `https://`、去掉末尾 `/`，且必须是有效 HTTP(S) **基础地址**，不得传入既有接口路径或 query。必填项或显式地址非法时，`init()` 返回 `false` 并记录受控诊断：不创建实例、不读写 SDK storage、不采集；接入方修正配置后可再次主动调用 `init()`。首次成功后，后续 `init()` 返回 `false` 并记录 `already_initialized`，原实例不变。`appId` 是保留的跨端输入：当前 App profile 接受但在此边界直接剥离，不校验其内容、不写入 `ResolvedGioConfig`、storage、日志或采集报文，也绝不用于覆盖 App `domain`；未来 Web / 小程序 profile 才各自定义并消费它。`appChannel` 是 App 三端完全一致的可选 init 字段：非空字符串 trim 后写为 `ResolvedGioConfig.appChannel`，未传或空白时为 `null`；不读取 `uni.getAppBaseInfo().channel` 等平台专属渠道，也不做端侧猜测。它是 init 期固定值，`setOptions()` 不得修改，也不写 storage。`urlScheme` 不属于基础 init：一期没有 Deep Link 或圈选插件，基础 SDK 不读取、存储或上报它；以后只能由相应插件的专属配置提供。`dataCollect` 默认 `true`，`idMapping`、`debug` 默认 `false`，三者都是 init 输入；只有 `dataCollect` 可由 `setOptions()` 在运行时改变。`sessionExpires` 与 Web SDK 同名、同单位，单位为分钟：必须是大于 `0` 的有限数，允许小数，换算后的毫秒值也必须有限且大于 `0`；传入 `0`、负数、NaN、Infinity 或非数字时 `init()` 失败。未传时由 profile 补默认值，App 为 `0.5`（30 秒）、Web 为 `30`、小程序为 `5`。它不支持 `setOptions()` 热修改。请求超时 5000ms、队列上限 200，都是内部固定策略。App 和 Web 事件入队后立即尝试发送；20 条/5000ms 的聚合节流仅适用于小程序，不应用到 App/Web。并发槽位占满、明确断网或失败重试时按各自策略等待，后台与重连可立即发送。`appVersion` 是用户可选的 fallback：非空时归一化为 `appVersionFallback`，不是最终上报值。其余 core 模块、平台适配器和插件不得再对可选字段各自补默认值。
+`src/constants/config.ts` 是唯一允许读取 `GioInitOptions` 的位置：`accountId`、`dataSourceId` 必须是非空且 UTF-16 合法的字符串，拒绝未配对代理字符，保留合法中文与 emoji；`serverUrl` 未传时固定补为 `https://napi.growingio.com`，传入时 trim、仅域名自动补 `https://`、去掉末尾 `/`，且必须是有效 HTTP(S) **基础地址**，不得传入既有接口路径或 query。必填项或显式地址非法时，`init()` 返回 `false` 并记录受控诊断：不创建实例、不读写 SDK storage、不采集；接入方修正配置后可再次主动调用 `init()`。首次成功后，后续 `init()` 返回 `false` 并记录 `already_initialized`，原实例不变。`appId` 是保留的跨端输入：当前 App profile 接受但在此边界直接剥离，不校验其内容、不写入 `ResolvedGioConfig`、storage、日志或采集报文，也绝不用于覆盖 App `domain`；未来 Web / 小程序 profile 才各自定义并消费它。`appChannel` 是 App 三端完全一致的可选 init 字段：非空字符串 trim 后写为 `ResolvedGioConfig.appChannel`，未传或空白时为 `null`；不读取 `uni.getAppBaseInfo().channel` 等平台专属渠道，也不做端侧猜测。它是 init 期固定值，`setOptions()` 不得修改，也不写 storage。`urlScheme` 不属于基础 init：一期没有 Deep Link 或圈选插件，基础 SDK 不读取、存储或上报它；以后只能由相应插件的专属配置提供。`dataCollect` 默认 `true`，`idMapping`、`debug` 默认 `false`，三者都是 init 输入；只有 `dataCollect` 可由 `setOptions()` 在运行时改变。`sessionExpires` 与 Web SDK 同名、同单位，单位为分钟：必须是大于 `0` 的有限数，允许小数，换算后的毫秒值也必须有限且大于 `0`；传入 `0`、负数、NaN、Infinity 或非数字时 `init()` 失败。未传时由 profile 补默认值，App 为 `0.5`（30 秒）、Web 为 `30`、小程序为 `5`。它不支持 `setOptions()` 热修改。请求超时 5000ms、队列上限 200，都是内部固定策略。App 和 Web 事件入队后立即尝试发送；20 条/5000ms 的聚合节流仅适用于小程序，不应用到 App/Web。并发槽位占满、明确断网或失败重试时按各自策略等待，后台与重连可立即发送。`appVersion` 是用户可选的 fallback：非空时归一化为 `appVersionFallback`，不是最终上报值。其余 core 模块、平台适配器和插件不得再对可选字段各自补默认值。
 
 调用顺序也固定：先 `gdp('registerPlugins', ...)`，再 `gdp('init', ...)`。业务侧所有事件、身份、属性和位置操作都只能通过 `gdp('xxx')`；SDK 不向页面暴露 tracker 或 `$gio`。只有客户显式注册的插件在 `install(growingio)` 中得到内部实例。首次 `init()` 返回 `true` 后，tracker 可短暂处于 `initializing`，该期间发生的事件才进入 bootstrap buffer，待 identity、session 和 SystemContext 完成后按发生顺序构建。这样既保留独立 SDK 的“插件先声明、初始化时统一安装”语义，也不会丢失合法初始化后的首屏事件。
 
@@ -307,7 +298,7 @@ type GioPlugin = {
 
 插件不是 `platform` 适配器。所有产品能力使用同一份 `GioPlugin` 契约；需要 Vue 能力时，在**同一个插件对象**上实现可选的 `installVue`。无埋点的运行时部分是正式插件，Vite 插件则是它的编译期探针安装器：
 
-| 类型 | 责任 | 是否进入 `core/plugins.ts` |
+| 类型 | 责任 | 是否进入 `src/core/lifecycle.ts` |
 |---|---|---|
 | 产品插件 | 无埋点、ABTest、圈选、分享、性能等可选产品能力；可选接入 Vue runtime | 是 |
 | 平台适配器 | request、storage、network、system 的端侧实现 | 否，属于 `platform/` 并实现 ports |
@@ -540,14 +531,14 @@ type PageSnapshot = {
 gdp('init') runtime construction
   → SDK 创建内部 App runtime 并安装唯一 dispatcher target
   → SDK 安装生命周期 mixin；业务侧仍只经 gdp 命令调用
-  → runtime/autotrack-dispatch.ts 查找已就绪的 gioEventAutoTracking
+  → src/plugins/gioEventAutoTracking/index.ts 查找已就绪的 gioEventAutoTracking
   → 插件：页面快照 + currentTarget 元数据 + ignore/敏感规则 + normalizer + 去重
   → core 内部无埋点入口
   → core：protocol 校验/补全 identity-session-page/eventSequenceId
   → privacy gate → queue → TransportPort → collector
 ```
 
-`gioUniappAutoTrack()` 不直接构建 `VIEW_CLICK` / `VIEW_CHANGE`、不保存事件、也不发请求；`gioEventAutoTracking` 不解析 `.vue` 源码。两者只能通过同一份 `autotrack/contract.ts` 交互，`schemaVersion` 不匹配时 dispatcher 返回 `false`、记录兼容性诊断且不采集。
+`gioUniappAutoTrack()` 不直接构建 `VIEW_CLICK` / `VIEW_CHANGE`、不保存事件、也不发请求；`gioEventAutoTracking` 不解析 `.vue` 源码。两者只能通过同一份 `src/plugins/gioEventAutoTracking/contract.ts` 交互，`schemaVersion` 不匹配时 dispatcher 返回 `false`、记录兼容性诊断且不采集。
 
 无埋点接入顺序固定为“创建 app → 注册 `gioEventAutoTracking` → `gdp('init', ..., { uniVue: app })` → Vue 挂载”。插件先声明、由初始化统一安装，和独立 SDK 的配置/初始化语义一致；Vite 配置和应用入口分属构建与运行时，不能靠全局变量相互猜测：
 
@@ -568,7 +559,7 @@ Vite 插件不得直接构建网络事件，它只调用 runtime 的稳定 schem
 
 `dispatchAutoTrack()` 是 dispatcher 对 `gioEventAutoTracking` 的唯一入口：插件未注册、尚未 ready、`dataCollect=false`、页面快照不存在、schema 不匹配、元素被忽略/敏感或被去重时都返回 `false`，不抛异常、不影响业务 handler。只有插件 normalizer 确认得到可上报动作后，才调用 core 的受限内部入口；core 仍是唯一能把它变成协议 `VIEW_*` 事件的一层。
 
-`runtime/autotrack-dispatch.ts` 只保存当前 tracker 的模块内 gateway，不挂到 `globalThis`、Vue app 或 `uni` 对象。`gioEventAutoTracking` 成功安装后以实例 token attach gateway；一期没有 destroy/re-init，重复 init 直接失败。未来若支持多实例或完整销毁，必须在 `AutoTrackCall` 中新增显式 tracker key，不能按全局“最后初始化者”猜测。
+`src/plugins/gioEventAutoTracking/index.ts` 只保存当前 tracker 的模块内 gateway，不挂到 `globalThis`、Vue app 或 `uni` 对象。`gioEventAutoTracking` 成功安装后以实例 token attach gateway；一期没有 destroy/re-init，重复 init 直接失败。未来若支持多实例或完整销毁，必须在 `AutoTrackCall` 中新增显式 tracker key，不能按全局“最后初始化者”猜测。
 
 二期 Vue2/Webpack、未来 H5 DOM 和小程序探针必须生成完全相同的调用；不得让任何端另造事件协议。
 
@@ -705,7 +696,7 @@ gio:v1:{dataSourceId}:meta
 
 ### 9.2 存储边界与记录格式
 
-`core` 不直接调用 `uni.getStorageSync`、`localStorage` 或任一小程序全局对象。`core/ports.ts` 定义异步存储端口；一期 App 适配器可以在内部调用同步 `uni` API 后立即 resolve，但 core 从第一天起不依赖同步特性：
+`core` 不直接调用 `uni.getStorageSync`、`localStorage` 或任一小程序全局对象。`src/types/index.ts` 定义异步存储端口；一期 App 适配器可以在内部调用同步 `uni` API 后立即 resolve，但 core 从第一天起不依赖同步特性：
 
 ```ts
 type StorageArea = 'state' | 'queue'
@@ -819,7 +810,7 @@ App 适配器的 `persistentQueue=true`，同一队列的读改写由 core 串�
 
 ### 10.1 请求边界
 
-一期实际使用 `platform/app-request.ts` 对 `uni.request` 的封装；但 `core/uploader.ts` 不得直接调用 `uni.request`、`fetch`、`XMLHttpRequest` 或任一小程序全局对象。它只调用 `core/ports.ts` 中的同一个端口：
+一期实际使用 `src/platform/uni.ts` 对 `uni.request` 的封装；但 `src/core/uploader.ts` 不得直接调用 `uni.request`、`fetch`、`XMLHttpRequest` 或任一小程序全局对象。它只调用 `src/types/index.ts` 中的同一个端口：
 
 ```ts
 type TransportRequest = {
@@ -1181,7 +1172,7 @@ type Capability = {
 
 按风险而不是按目录排序：
 
-1. Vue2 / Webpack 插桩器，复用 `autotrack/contract.ts`；
+1. Vue2 / Webpack 插桩器，复用 `src/plugins/gioEventAutoTracking/contract.ts`；
 2. `.nvue` 页面生命周期与无埋点能力；
 3. H5：独立 profile、CORS/Storage 和 DOM 增强；
 4. 小程序：从 mini SDK platform profile 逐家接入，不把 App 兼容假设带过去；

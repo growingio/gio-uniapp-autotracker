@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { OrientationResolver } from '../../runtime/orientation.js'
+import { OrientationResolver } from '../../src/core/dataStore/page.js'
 
 describe('OrientationResolver', () => {
   it('uses standard orientation before a meaningful window dimension inference', () => {

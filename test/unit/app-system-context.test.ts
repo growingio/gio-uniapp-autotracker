@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { AppSystemContextPort } from '../../platform/app-system-context.js'
+import { AppSystemContextPort } from '../../src/platform/system.js'
 
 describe('AppSystemContextPort', () => {
   afterEach(() => vi.unstubAllGlobals())

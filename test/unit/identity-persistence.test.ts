@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
-import { IdentityPersistence } from '../../core/identity-persistence.js'
-import { serializeIdentityRecord } from '../../core/identity.js'
-import type { StoragePort } from '../../core/ports.js'
+import { IdentityPersistence } from '../../src/core/storage/index.js'
+import { serializeIdentityRecord } from '../../src/core/userStore.js'
+import type { StoragePort } from '../../src/types/index.js'
 
 function port(read: Awaited<ReturnType<StoragePort['read']>>): { port: StoragePort; writes: string[]; removals: string[] } {
   const writes: string[] = []

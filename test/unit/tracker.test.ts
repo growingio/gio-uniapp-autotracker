@@ -1,12 +1,12 @@
-import { storageKeys } from '../../core/storage-keys.js'
-import { readIdentityRecord } from '../../core/identity.js'
+import { storageKeys } from '../../src/core/storage/index.js'
+import { readIdentityRecord } from '../../src/core/userStore.js'
 import { testAutoTrackProfile } from '../support/autotrack-fixture.js'
 import { describe, expect, it } from 'vitest'
 
-import type { AppSystemContext, LoggerPort, NetworkPort, NetworkState, StorageArea, StoragePort, StorageRead, StorageWrite, TransportPort } from '../../core/ports.js'
-import type { UploaderRuntime } from '../../core/uploader.js'
-import type { ProtocolEvent } from '../../core/protocol.js'
-import { TrackerRuntime } from '../../runtime/tracker.js'
+import type { AppSystemContext, LoggerPort, NetworkPort, NetworkState, StorageArea, StoragePort, StorageRead, StorageWrite, TransportPort } from '../../src/types/index.js'
+import type { UploaderRuntime } from '../../src/core/uploader.js'
+import type { ProtocolEvent } from '../../src/core/dataStore/protocol.js'
+import { TrackerRuntime } from '../../src/core/growingIO.js'
 
 class MemoryStorage implements StoragePort {
   public readonly persistentQueue = true

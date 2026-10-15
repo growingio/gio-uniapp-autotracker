@@ -1,10 +1,9 @@
-import { createAppTracker, type AppRuntimeHost, type AppRuntimeOptions } from './platform/app-runtime.js'
-import type { GioInitOptions } from './core/config.js'
-import type { GioBuiltinPlugin } from './core/plugin-registry.js'
-import { TrackerRuntime } from './runtime/tracker.js'
-import { installUniAppLifecycle, type UniAppVueApp } from './runtime/uniapp-installer.js'
-import { guid } from './core/guid.js'
-import { SDK_VERSION } from './core/sdk-version.js'
+import { createAppTracker, type AppRuntimeHost, type AppRuntimeOptions } from './src/platform/index.js'
+import { SDK_VERSION, type GioInitOptions } from './src/constants/config.js'
+import type { GioBuiltinPlugin } from './src/core/lifecycle.js'
+import { TrackerRuntime } from './src/core/growingIO.js'
+import { installUniAppLifecycle, type UniAppVueApp } from './src/adapters/uniapp.js'
+import { guid } from './src/utils/tools.js'
 
 let singleton: TrackerRuntime | null = null
 let gdpTracker: TrackerRuntime | null = null
@@ -168,4 +167,4 @@ declare global {
 
 export default gdp
 
-export type { GioBuiltinPlugin } from './core/plugin-registry.js'
+export type { GioBuiltinPlugin } from './src/core/lifecycle.js'

@@ -10,6 +10,6 @@
     "noEmit": true,
     "skipLibCheck": true
   },
-  "include": ["index.ts", "vite.ts", "core/**/*.ts", "runtime/**/*.ts", "platform/**/*.ts", "autotrack/**/*.ts"],
+  "include": ["index.ts", "autotrack.ts", "vite.ts", "src/**/*.ts"],
   "exclude": ["node_modules", "demo", "scripts", "test", "dist", "release"]
 }

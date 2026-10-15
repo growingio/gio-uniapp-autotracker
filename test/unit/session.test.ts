@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { SessionManager } from '../../core/session.js'
+import { SessionManager } from '../../src/core/userStore.js'
 
 function ids(...values: string[]): () => string {
   let index = 0

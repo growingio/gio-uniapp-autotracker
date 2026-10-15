@@ -12,7 +12,7 @@ export const archivesDir = join(dist, 'release')
 export const metadata = JSON.parse(await readFile(join(root, 'package.json'), 'utf8')) as {
   name: string; version: string; description: string
 }
-export const runtimeEntries = ['index.js', 'index.d.ts', 'autotrack.js', 'autotrack.d.ts', 'core', 'runtime', 'platform']
+export const runtimeEntries = ['index.js', 'index.d.ts', 'autotrack.js', 'autotrack.d.ts', 'src']
 
 export async function files(directory: string, prefix = ''): Promise<string[]> {
   const output: string[] = []
@@ -33,7 +33,7 @@ export async function hashes(directory: string): Promise<Record<string, string>>
 export async function sourceHash(): Promise<string> {
   const inputs = ['index.ts', 'autotrack.ts', 'vite.ts', 'package.json', 'pnpm-lock.yaml', 'tsconfig.json', 'tsconfig.build.json', 'tsconfig.dev.json', 'vitest.config.ts', 'README.md', 'LICENSE']
   // 测试与门禁配置也属于本次构建依据，改动后不能沿用旧交付包的检查结果。
-  for (const directory of ['core', 'runtime', 'platform', 'autotrack', 'doc', 'scripts', 'test', '.github/workflows']) inputs.push(...(await files(join(root, directory))).map((file) => `${directory}/${file}`))
+  for (const directory of ['src', 'doc', 'scripts', 'test', '.github/workflows']) inputs.push(...(await files(join(root, directory))).map((file) => `${directory}/${file}`))
   const hash = createHash('sha256')
   for (const file of inputs.sort()) hash.update(file).update('\0').update(await readFile(join(root, file))).update('\0')
   return hash.digest('hex')

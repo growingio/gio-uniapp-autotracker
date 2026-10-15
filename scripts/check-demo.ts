@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { transformAutoTrackSfc } from '../autotrack/vite.js'
+import { transformAutoTrackSfc } from '../src/compiler/vite.js'
 
 const root = resolve(import.meta.dirname, '..')
 const required = [

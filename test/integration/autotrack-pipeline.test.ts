@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { AppSystemContext, StoragePort } from '../../core/ports.js'
-import { dispatchAutoTrack, installAutoTrackDispatcher } from '../../runtime/autotrack-dispatch.js'
-import { createPageLifecycleBridge } from '../../runtime/page-bridge.js'
-import { TrackerRuntime } from '../../runtime/tracker.js'
+import type { AppSystemContext, StoragePort } from '../../src/types/index.js'
+import { dispatchAutoTrack, installAutoTrackDispatcher } from '../../src/plugins/gioEventAutoTracking/index.js'
+import { createPageLifecycleBridge } from '../../src/adapters/uniapp.js'
+import { TrackerRuntime } from '../../src/core/growingIO.js'
 import { createMockCollector, type MockCollector } from '../support/mock-collector.js'
 import { mountAutoTrackSfc, testAutoTrackProfile } from '../support/autotrack-fixture.js'
-import type { AutoTrackCall } from '../../autotrack/contract.js'
+import type { AutoTrackCall } from '../../src/plugins/gioEventAutoTracking/contract.js'
 
 const system: AppSystemContext = {
   platform: 'Android', platformVersion: '14', domain: 'com.example.app', appState: 'FOREGROUND', appName: 'Example',

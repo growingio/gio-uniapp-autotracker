@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { normalizeAutoTrackCall, MAX_RANGE_ITEMS } from '../../runtime/autotrack-normalize.js'
+import { normalizeAutoTrackCall, MAX_RANGE_ITEMS } from '../../src/plugins/gioEventAutoTracking/index.js'
 
 const click = { schemaVersion: 2, source: 'template', kind: 'click', eventName: 'submitOrder', elementType: 'button' } as const
 const change = { ...click, kind: 'change', elementType: 'input', trackValue: true } as const

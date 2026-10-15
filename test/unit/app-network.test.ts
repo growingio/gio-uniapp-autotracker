@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { AppNetworkPort, normalizeAppNetworkState } from '../../platform/app-network.js'
+import { AppNetworkPort, normalizeAppNetworkState } from '../../src/platform/network.js'
 
 describe('AppNetworkPort', () => {
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })

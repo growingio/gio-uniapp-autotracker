@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { EventSequence } from '../../core/event-sequence.js'
+import { EventSequence } from '../../src/core/dataStore/index.js'
 
 describe('EventSequence', () => {
   it('uses one positive, monotonic sequence for every protocol event that requires it', () => {

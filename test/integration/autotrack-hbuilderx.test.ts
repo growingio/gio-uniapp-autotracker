@@ -12,7 +12,7 @@ const probe = `
   Module._resolveFilename = function(request, ...args) {
     return original.call(this, request === '@vue/shared' ? sharedPath : request, ...args);
   };
-  const { transformAutoTrackSfc } = require('./autotrack/vite.ts');
+  const { transformAutoTrackSfc } = require('./src/compiler/vite.ts');
   const result = transformAutoTrackSfc('<script setup>const save = e => e</script><template><template v-if="true"><button @tap="save($event)"/></template></template>');
   if (!result.changed || result.warnings.length > 0) throw new Error('autotrack_transform_failed');
   console.log('hbuilderx_shared_alias_passed');

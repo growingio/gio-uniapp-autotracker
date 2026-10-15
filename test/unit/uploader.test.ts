@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
-import { EventQueue } from '../../core/queue.js'
-import type { TransportPort, TransportResult } from '../../core/ports.js'
-import { Uploader, type UploaderRuntime } from '../../core/uploader.js'
-import type { ProtocolEvent } from '../../core/protocol.js'
+import { EventQueue } from '../../src/core/queue.js'
+import type { TransportPort, TransportResult } from '../../src/types/index.js'
+import { Uploader, type UploaderRuntime } from '../../src/core/uploader.js'
+import type { ProtocolEvent } from '../../src/core/dataStore/protocol.js'
 
 function event(sequence: number): ProtocolEvent {
   return { eventType: 'CUSTOM', eventName: `event_${sequence}`, eventSequenceId: sequence } as ProtocolEvent

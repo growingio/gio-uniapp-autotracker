@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { installUniAppLifecycle, type UniAppVueApp } from '../../runtime/uniapp-installer.js'
+import { installUniAppLifecycle, type UniAppVueApp } from '../../src/adapters/uniapp.js'
 
 type HookSet = Readonly<{
   onLaunch: (this: Record<string, unknown>, options: unknown) => void

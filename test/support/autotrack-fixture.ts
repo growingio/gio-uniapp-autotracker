@@ -1,9 +1,9 @@
 import * as Vue from 'vue'
 import { compileScript, compileTemplate, parse } from '@vue/compiler-sfc'
 import ts from 'typescript'
-import { transformAutoTrackSfc } from '../../autotrack/vite.js'
-import { CHANGE_ELEMENTS, TEMPLATE_ELEMENTS } from '../../autotrack/contract.js'
-import type { AppCapabilityProfile } from '../../platform/capabilities.js'
+import { transformAutoTrackSfc } from '../../src/compiler/vite.js'
+import { CHANGE_ELEMENTS, TEMPLATE_ELEMENTS } from '../../src/plugins/gioEventAutoTracking/contract.js'
+import type { AppCapabilityProfile } from '../../src/constants/platform.js'
 
 // 这里只描述受控测试宿主，绝不把测试通过写入生产平台的能力表。
 export const testAutoTrackProfile: AppCapabilityProfile = {

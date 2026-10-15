@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
-import { QueuePersistence } from '../../core/queue-persistence.js'
-import { buildAppEvent } from '../../core/protocol.js'
-import { EventQueue } from '../../core/queue.js'
-import type { StoragePort } from '../../core/ports.js'
-import type { ProtocolEvent } from '../../core/protocol.js'
+import { QueuePersistence } from '../../src/core/storage/index.js'
+import { buildAppEvent } from '../../src/core/dataStore/protocol.js'
+import { EventQueue } from '../../src/core/queue.js'
+import type { StoragePort } from '../../src/types/index.js'
+import type { ProtocolEvent } from '../../src/core/dataStore/protocol.js'
 import { APP_EVENT_FIXTURES } from '../contracts/app-protocol.fixture.js'
 
 function event(sequence: number): ProtocolEvent {

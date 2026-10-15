@@ -5,7 +5,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { loadConfigFromFile } from 'vite'
-import type { UniAppAutoTrackVitePlugin } from '../autotrack/vite.js'
+import type { UniAppAutoTrackVitePlugin } from '../src/compiler/vite.js'
 import { archivesDir, hashes, metadata, modulesDir, npmDir, root, sdkName } from './release-layout.js'
 
 const release = JSON.parse(await readFile(join(archivesDir, 'release.json'), 'utf8')) as { npmFile: string; npmIntegrity: string; uniFile: string; uniSha256: string; version: string }

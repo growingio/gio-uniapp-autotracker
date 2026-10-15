@@ -4,10 +4,10 @@ import { resolve } from 'node:path'
 
 import { describe, expect, it, vi } from 'vitest'
 
-import { transformAutoTrackSfc } from '../../autotrack/vite.js'
-import type { AppRuntimeHost } from '../../platform/app-runtime.js'
-import type { ProtocolEvent } from '../../core/protocol.js'
-import type { TrackerRuntime } from '../../runtime/tracker.js'
+import { transformAutoTrackSfc } from '../../src/compiler/vite.js'
+import type { AppRuntimeHost } from '../../src/platform/index.js'
+import type { ProtocolEvent } from '../../src/core/dataStore/protocol.js'
+import type { TrackerRuntime } from '../../src/core/growingIO.js'
 import { mountAutoTrackSfc } from '../support/autotrack-fixture.js'
 
 type LifecycleHooks = Readonly<{
@@ -109,7 +109,7 @@ describe('demo scenarios', () => {
 
   it('runs the gdp-only lifecycle, consent, identity, custom-event, and autotrack journey', async () => {
     vi.resetModules()
-    vi.doMock('../../platform/capabilities.js', () => ({ appCapabilityProfile: () => testAutoTrackProfile }))
+    vi.doMock('../../src/constants/platform.js', () => ({ appCapabilityProfile: () => testAutoTrackProfile }))
     const originalUni = (globalThis as Record<string, unknown>).uni
     const originalGdp = (globalThis as Record<string, unknown>).gdp
     let hooks!: LifecycleHooks
@@ -197,7 +197,7 @@ describe('demo scenarios', () => {
       })
       expect(events.some((event) => Object.values(event).includes('must-not-leak'))).toBe(false)
     } finally {
-      vi.doUnmock('../../platform/capabilities.js')
+      vi.doUnmock('../../src/constants/platform.js')
       if (originalUni === undefined) delete (globalThis as Record<string, unknown>).uni
       else (globalThis as Record<string, unknown>).uni = originalUni
       if (originalGdp === undefined) delete (globalThis as Record<string, unknown>).gdp

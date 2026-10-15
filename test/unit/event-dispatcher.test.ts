@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
-import { normalizeInitOptions } from '../../core/config.js'
-import { EventComposer } from '../../core/event-composer.js'
-import { EventDispatcher } from '../../runtime/event-dispatcher.js'
-import { EventSequence } from '../../core/event-sequence.js'
-import { LocationState } from '../../core/location-state.js'
-import { PageStore } from '../../core/page-store.js'
-import type { AppSystemContext } from '../../core/ports.js'
-import { EventQueue } from '../../core/queue.js'
-import { SessionManager } from '../../core/session.js'
+import { normalizeInitOptions } from '../../src/constants/config.js'
+import { EventComposer } from '../../src/core/dataStore/index.js'
+import { EventDispatcher } from '../../src/core/dataStore/index.js'
+import { EventSequence } from '../../src/core/dataStore/index.js'
+import { LocationState } from '../../src/core/userStore.js'
+import { PageStore } from '../../src/core/dataStore/page.js'
+import type { AppSystemContext } from '../../src/types/index.js'
+import { EventQueue } from '../../src/core/queue.js'
+import { SessionManager } from '../../src/core/userStore.js'
 
 const normalized = normalizeInitOptions({ accountId: 'account', dataSourceId: 'source' })
 if (normalized.ok === false) throw new Error('fixture_config_invalid')

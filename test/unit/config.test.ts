@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { normalizeInitOptions } from '../../core/config.js'
-import { createAppTracker } from '../../platform/app-runtime.js'
+import { normalizeInitOptions } from '../../src/constants/config.js'
+import { createAppTracker } from '../../src/platform/index.js'
 
 const required = { accountId: ' account ', dataSourceId: ' source ' }
 

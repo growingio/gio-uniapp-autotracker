@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import { CHANGE_ELEMENTS } from '../../autotrack/contract.js'
-import { allAppCapabilityProfiles, appCapabilityProfile } from '../../platform/capabilities.js'
+import { CHANGE_ELEMENTS } from '../../src/plugins/gioEventAutoTracking/contract.js'
+import { allAppCapabilityProfiles, appCapabilityProfile } from '../../src/constants/platform.js'
 
 describe('App capability profiles', () => {
   it('keeps every unverified App feature disabled until device evidence is recorded', () => {

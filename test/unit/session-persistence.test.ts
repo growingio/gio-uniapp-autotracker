@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import { SessionPersistence } from '../../core/session-persistence.js'
-import type { StoragePort } from '../../core/ports.js'
+import { SessionPersistence } from '../../src/core/storage/index.js'
+import type { StoragePort } from '../../src/types/index.js'
 
 function port(value: Awaited<ReturnType<StoragePort['read']>>): { port: StoragePort; removed: () => number; writes: string[] } {
   let removals = 0

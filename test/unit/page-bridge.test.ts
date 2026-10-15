@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { createPageLifecycleBridge } from '../../runtime/page-bridge.js'
+import { createPageLifecycleBridge } from '../../src/adapters/uniapp.js'
 
 describe('createPageLifecycleBridge', () => {
   it('freezes one serializable onLoad snapshot and delegates later lifecycle hooks with the same instance id', () => {

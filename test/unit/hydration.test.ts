@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { hydrateTrackerState } from '../../core/hydration.js'
+import { hydrateTrackerState } from '../../src/core/lifecycle.js'
 
 const context = {
   platform: 'Android' as const, platformVersion: '14', domain: 'com.example', appState: 'FOREGROUND' as const,

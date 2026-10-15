@@ -22,7 +22,7 @@
 
 ## 验证构建与验收状态
 
-正式构建继续由 `platform/capabilities.ts` 禁用尚未验收的 autoClick、tabBar 和逐组件 autoChange。demo 的 `vite.config.ts` 独立设置 `__GIO_AUTOTRACK_VERIFICATION__: true`，只用于开放待验收采集链路；该开关不回写生产验收矩阵，正式应用不要复制。
+正式构建继续由 `src/constants/platform.ts` 禁用尚未验收的 autoClick、tabBar 和逐组件 autoChange。demo 的 `vite.config.ts` 独立设置 `__GIO_AUTOTRACK_VERIFICATION__: true`，只用于开放待验收采集链路；该开关不回写生产验收矩阵，正式应用不要复制。
 
 本地验证包括 TypeScript、实际 Vue listener 执行、源 SFC 到协议再到 HTTP mock collector、编译产物消费者类型、demo 结构及 release 包检查。未取得本 SDK 三端真实设备请求与 collector/服务端接收的完整证据。
 

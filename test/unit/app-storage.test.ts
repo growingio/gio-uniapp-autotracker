@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { AppStoragePort, type AppStorageApi } from '../../platform/app-storage.js'
+import { AppStoragePort, type AppStorageApi } from '../../src/platform/uni.js'
 
 function api(overrides: Partial<AppStorageApi> = {}): AppStorageApi {
   return {

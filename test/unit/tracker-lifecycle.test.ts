@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { TrackerLifecycle } from '../../core/tracker-lifecycle.js'
+import { TrackerLifecycle } from '../../src/core/lifecycle.js'
 
 const options = { accountId: 'account', dataSourceId: 'source' }
 

@@ -61,14 +61,14 @@
 
 ### 工作项
 
-1. 实现 `core/config.ts`：对外 `GioInitOptions` 只要求非空 `accountId`、`dataSourceId`；`serverUrl` 未传时补为 `https://napi.growingio.com`，传入时规范为 HTTP(S) 基础地址（仅域名补 `https://`、移除末尾 `/`）。非法必填项或显式地址使 `init()` 返回 `false`，且不创建实例、不读写 SDK storage；修正后允许接入方再次主动初始化。首次成功后重复 `init()` 返回 `false` 并保持原实例。默认值只能在这里补齐。`appId` 保留为 Web / 小程序 profile 的跨端输入，当前 App profile 接受后即剥离，不校验、不持久化、不上报且不影响 `domain`。`appChannel` 是 App 三端统一的可选 init 配置：非空 trim 后写入 resolved config，空白/未传则为 `null` 并在出站省略；不读取系统渠道、不经 UTS、也不支持运行时修改。`dataCollect` 默认 `true`，仅显式传 `false` 时禁止事件生成、持久化与上传；必要 identity/session 状态仍可初始化。`idMapping` 默认 `false` 且仅 init 期可设。`sessionExpires` 是 init 期可选配置，与 Web SDK 同名、同为分钟单位，必须是大于 `0` 的有限数并允许小数；未传时 profile 默认值分别为 App `0.5`（30 秒）、Web `30`、小程序 `5`。core 只接收解析后的毫秒 `SessionPolicy`；未来小程序对 `keepAlive`（分钟）的兼容映射只留在其 profile 边界，未来 Web profile 必须保留 `0.5` 等正小数而不能沿用旧的整分 normalizer。上传超时、队列上限和发送阈值仍为内部策略，不作为 `GioInitOptions` 暴露。
-2. 实现 `core/protocol.ts` 与 `core/event-builder.ts`：公共 context、事件专有字段、字段裁剪、长度与类型验证，并在入队前运行统一 `sanitizeOutboundEvent`；它移除 `null`、`undefined`、空字符串、空对象和空数组，保留 `0`，使读取失败的系统字段不会作为空值发出。CUSTOM `eventName` 固定为 `^[A-Za-z_][A-Za-z0-9_]{0,99}$`，非法时整条拒绝且不分配序号；所有 attributes 经同一 normalizer 输出 `Map<string,string>`（key 100、value 1000、一层数组 `||` 拼接、null/undefined 为空字符串、嵌套对象拒绝）。
-3. 实现 `core/identity.ts` 与 `core/identity-cipher.ts`：稳定 `deviceId`、`userId`、`userKey`、clear 语义和 storage migration；身份字段使用 `xor-utf8-v1`（UTF-8 字节级循环 XOR + Base64URL），统一输出 `gioenc-v3-` 前缀；存储 key 统一使用 `gio:v1:` 前缀。所有值经 version envelope 读写，不直接操作宿主存储。
-4. 实现 `core/session.ts`：新访问、热启动续接、session 更新和 `eventSequenceId`；匿名 → 首个 userId 不切 session，已登录 A → B 时新 session + `VISIT`，登出不新建 session/`VISIT`。
-5. 实现 `core/page-store.ts`：`pageKey`、当前页、referral、`pageShowTimestamp`；只保存纯数据。
-6. 实现仅内存的 `core/location-state.ts`：`setLocation()` 校验有限数和纬度/经度范围（含合法 `0`），`clearLocation()` / 进程重启清除；不得请求权限、不得写 storage。
-7. 实现与 uniappx 当前能力同级的 `core/plugins.ts`：只允许在首次 `init()` 前声明已交付的内置插件名称，重复或未知名称返回 `false`；声明仅留内存，`init()` 参数校验成功后才按声明顺序安装。配置失败后保留声明，修正后重试无需重新注册；首次成功后注册窗口关闭。一期只交付同名 `gioEventAutoTracking`，不实现第三方插件 hook、capability registry、插件 storage/request 或 destroy/dispose 生命周期。基础 init 不含 `urlScheme`；以后 Deep Link／圈选插件如需它，必须使用插件专属配置并先扩展协议与 intent。
-8. 定义 `core/ports.ts` 并提供内存 fake，实现不依赖 `uni` 的单元测试。
+1. 实现 `src/constants/config.ts`：对外 `GioInitOptions` 只要求非空 `accountId`、`dataSourceId`；`serverUrl` 未传时补为 `https://napi.growingio.com`，传入时规范为 HTTP(S) 基础地址（仅域名补 `https://`、移除末尾 `/`）。非法必填项或显式地址使 `init()` 返回 `false`，且不创建实例、不读写 SDK storage；修正后允许接入方再次主动初始化。首次成功后重复 `init()` 返回 `false` 并保持原实例。默认值只能在这里补齐。`appId` 保留为 Web / 小程序 profile 的跨端输入，当前 App profile 接受后即剥离，不校验、不持久化、不上报且不影响 `domain`。`appChannel` 是 App 三端统一的可选 init 配置：非空 trim 后写入 resolved config，空白/未传则为 `null` 并在出站省略；不读取系统渠道、不经 UTS、也不支持运行时修改。`dataCollect` 默认 `true`，仅显式传 `false` 时禁止事件生成、持久化与上传；必要 identity/session 状态仍可初始化。`idMapping` 默认 `false` 且仅 init 期可设。`sessionExpires` 是 init 期可选配置，与 Web SDK 同名、同为分钟单位，必须是大于 `0` 的有限数并允许小数；未传时 profile 默认值分别为 App `0.5`（30 秒）、Web `30`、小程序 `5`。core 只接收解析后的毫秒 `SessionPolicy`；未来小程序对 `keepAlive`（分钟）的兼容映射只留在其 profile 边界，未来 Web profile 必须保留 `0.5` 等正小数而不能沿用旧的整分 normalizer。上传超时、队列上限和发送阈值仍为内部策略，不作为 `GioInitOptions` 暴露。
+2. 实现 `src/core/dataStore/protocol.ts` 与 `src/core/dataStore/index.ts`：公共 context、事件专有字段、字段裁剪、长度与类型验证，并在入队前运行统一 `sanitizeOutboundEvent`；它移除 `null`、`undefined`、空字符串、空对象和空数组，保留 `0`，使读取失败的系统字段不会作为空值发出。CUSTOM `eventName` 固定为 `^[A-Za-z_][A-Za-z0-9_]{0,99}$`，非法时整条拒绝且不分配序号；所有 attributes 经同一 normalizer 输出 `Map<string,string>`（key 100、value 1000、一层数组 `||` 拼接、null/undefined 为空字符串、嵌套对象拒绝）。
+3. 实现 `src/core/userStore.ts` 与 `src/core/storage/encrypt.ts`：稳定 `deviceId`、`userId`、`userKey`、clear 语义和 storage migration；身份字段使用 `xor-utf8-v1`（UTF-8 字节级循环 XOR + Base64URL），统一输出 `gioenc-v3-` 前缀；存储 key 统一使用 `gio:v1:` 前缀。所有值经 version envelope 读写，不直接操作宿主存储。
+4. 实现 `src/core/userStore.ts`：新访问、热启动续接、session 更新和 `eventSequenceId`；匿名 → 首个 userId 不切 session，已登录 A → B 时新 session + `VISIT`，登出不新建 session/`VISIT`。
+5. 实现 `src/core/dataStore/page.ts`：`pageKey`、当前页、referral、`pageShowTimestamp`；只保存纯数据。
+6. 实现仅内存的 `src/core/userStore.ts`：`setLocation()` 校验有限数和纬度/经度范围（含合法 `0`），`clearLocation()` / 进程重启清除；不得请求权限、不得写 storage。
+7. 实现与 uniappx 当前能力同级的 `src/core/lifecycle.ts`：只允许在首次 `init()` 前声明已交付的内置插件名称，重复或未知名称返回 `false`；声明仅留内存，`init()` 参数校验成功后才按声明顺序安装。配置失败后保留声明，修正后重试无需重新注册；首次成功后注册窗口关闭。一期只交付同名 `gioEventAutoTracking`，不实现第三方插件 hook、capability registry、插件 storage/request 或 destroy/dispose 生命周期。基础 init 不含 `urlScheme`；以后 Deep Link／圈选插件如需它，必须使用插件专属配置并先扩展协议与 intent。
+8. 定义 `src/types/index.ts` 并提供内存 fake，实现不依赖 `uni` 的单元测试。
 
 ### 验收
 
@@ -92,7 +92,7 @@
 
 ### 工作项
 
-1. 在 `core/ports.ts` 定义 `StoragePort`、`TransportPort` 与各自标准结果；在 `platform/uni.ts` 实现 system、network、scheduler、logger；一期实现 `platform/app-storage.ts` 与 `platform/app-request.ts`，分别归一化 `uni` storage 异常/容量失败和 `uni.request` 的 success/fail/complete、requestTask.abort、同步异常。
+1. 在 `src/types/index.ts` 定义 `StoragePort`、`TransportPort` 与各自标准结果；在 `src/platform/index.ts` 实现 system、network、scheduler、logger；一期实现 `src/platform/uni.ts` 与 `src/platform/uni.ts`，分别归一化 `uni` storage 异常/容量失败和 `uni.request` 的 success/fail/complete、requestTask.abort、同步异常。
 2. 实现有界内存队列、条数 / 字节上限和 drop reason：业务/状态指令与生命周期使用独立 bootstrap buffer，各为 50 条或 256KB，合计最多 100 条或 512KB，释放时按接收顺序合并；App 持久化队列为 200 条或 2MB；任一上限满时保留旧事件、丢弃新事件。`KB` / `MB` 均按 1024 换算，统一使用 UTF-8 编码后 `JSON.stringify` 的真实字节数：buffer 为完整数组、queue 为含 retry 元数据的完整持久化 envelope。仅 App 三端实现持久化快照与冷启动恢复，Web/小程序未来仅复用内存队列和当前运行期重试；`dataCollect` 由开关前置阻止后续事件生成，不清空历史队列、identity、session 或序号，也不取消既有上传任务。
 3. 实现 uploader：core 自己控制单请求 finalizer 与 deadline、每批最多 50 条和 512KB、最多 3 个并发、最多 2 次重试（800ms、1600ms，均 ±20% 抖动）、4xx 不重试、5xx/网络错误退避；单条超过 512KB 的事件记录 `event_too_large` 后直接丢弃。batch 上限按实际 HTTP JSON 数组 body 的 UTF-8 字节数计算，包含数组括号与分隔符。请求固定为 `POST {serverUrl}/v3/projects/{accountId}/collect?stm={sendAt}&compress=0`，使用 `Content-Type: application/json` 与 `Accept: application/json`，Body 为清理后的 JSON 事件数组；禁止在 core 直接调用任何宿主请求 API。
 4. 实现冷启动恢复、网络恢复 flush 与前后台最长 1 秒 force flush；一期没有公开或内部 `destroy()` 生命周期。
@@ -114,8 +114,8 @@
 
 ### 工作项
 
-1. 实现 `runtime/app-lifecycle.ts`，并提供 `App.vue` 的显式 `onLaunch/onShow/onHide` 接入方式。
-2. 实现 `runtime/page-lifecycle.ts` 与 `page-snapshot.ts`；Page 生命周期只传 `route`、query、title、pageKey、当前 `referralPage` 等纯快照。前序页面 route 优先；无前序页时才允许使用平台入口来源，小程序为 `referrerInfo.appId` / `scn:...`，App 没有已验证来源则省略。
+1. 实现 `src/core/dataStore/app.ts`，并提供 `App.vue` 的显式 `onLaunch/onShow/onHide` 接入方式。
+2. 实现 `src/core/dataStore/page.ts` 与 `page-snapshot.ts`；Page 生命周期只传 `route`、query、title、pageKey、当前 `referralPage` 等纯快照。前序页面 route 优先；无前序页时才允许使用平台入口来源，小程序为 `referrerInfo.appId` / `scn:...`，App 没有已验证来源则省略。
 3. 实现 PAGE 专用 `OrientationPort`：每条 PAGE 先读取标准 deviceOrientation，再在可证实时由当前窗口宽高推断，最后复用本进程最后一个真实值；三者均不可用时以 `PORTRAIT` 兜底，仍构建 PAGE 并分配序号，不能因方向接口异常漏采页面。
 4. 验证 Vue3 Options API、Composition API、Tab 页、重复入栈同 route、返回上一页和前后台切换。
 5. 实现 `VISIT`、`PAGE`、`APP_CLOSED` 的运行时调度，确保 `APP_CLOSED` 不从 Page hide 推断。每次真实 `Page:onShow` 自动发送 `PAGE`，并维护页面快照供其他事件使用；一期不实现 `trackPage` 开关或 `sendPage()`。
@@ -136,9 +136,9 @@
 
 ### 工作项
 
-1. 实现一方内置插件 `autotrack/plugin.ts`（名称 `gioEventAutoTracking`）：通过一期的内置插件注册表安装 tabBar / 页面 hook 和模块内 dispatcher gateway；它只把合法 `AutoTrackCall` 交给 core 内部入口，由 core 生成受协议约束 `VIEW_CLICK` / `VIEW_CHANGE`。不实现通用 `GioPlugin`、hook、capability 或 dispose 契约。
-2. 实现其 Vite 伴随插件 `vite.ts` 与 `autotrack/vue3-vite.ts`，在 uni 编译器前使用 `@vue/compiler-sfc` 读取完整 Vue 3 `.vue` SFC，再处理 template AST；不得用正则截取可能嵌套的 `<template>`。它只安装探针，不建事件、不写队列、不发请求。Vue 2 / Webpack 不在 1.0 无埋点范围内。
-3. 按[无埋点方案](./uniapp-autotrack-design.md)定义并固定版本化 `AutoTrackCall`；普通模板 probe 传 `eventName`，白名单 change 额外传组件类型和 picker range，runtime 从第二参数 native event 即时裁出受限 change 快照，并以 `currentTarget || target` 的 id 生成 `id#eventName`；tabBar 固定为 `#onTabItemTap`。编译产物只调用 `runtime/autotrack-dispatch.ts`，由 dispatcher 路由至已 ready 的 `gioEventAutoTracking`，未注册/不匹配安全返回 false。
+1. 实现一方内置插件 `src/plugins/gioEventAutoTracking/index.ts`（名称 `gioEventAutoTracking`）：通过一期的内置插件注册表安装 tabBar / 页面 hook 和模块内 dispatcher gateway；它只把合法 `AutoTrackCall` 交给 core 内部入口，由 core 生成受协议约束 `VIEW_CLICK` / `VIEW_CHANGE`。不实现通用 `GioPlugin`、hook、capability 或 dispose 契约。
+2. 实现其 Vite 伴随插件 `vite.ts` 与 `src/compiler/vite.ts`，在 uni 编译器前使用 `@vue/compiler-sfc` 读取完整 Vue 3 `.vue` SFC，再处理 template AST；不得用正则截取可能嵌套的 `<template>`。它只安装探针，不建事件、不写队列、不发请求。Vue 2 / Webpack 不在 1.0 无埋点范围内。
+3. 按[无埋点方案](./uniapp-autotrack-design.md)定义并固定版本化 `AutoTrackCall`；普通模板 probe 传 `eventName`，白名单 change 额外传组件类型和 picker range，runtime 从第二参数 native event 即时裁出受限 change 快照，并以 `currentTarget || target` 的 id 生成 `id#eventName`；tabBar 固定为 `#onTabItemTap`。编译产物只调用 `src/plugins/gioEventAutoTracking/index.ts`，由 dispatcher 路由至已 ready 的 `gioEventAutoTracking`，未注册/不匹配安全返回 false。
 4. 覆盖 click/tap、tab、input/textarea、switch、slider、radio、checkbox、picker、picker-view 和 swiper 的受支持语义。
 5. 实现 `data-growing-ignore`、`data-growing-track`、`data-title`、`data-index`、`data-src`、敏感 input 默认拒绝和最大长度限制；ignore 同时检查 currentTarget 与原始 target，敏感 probe 即使带 track 也整条拒绝，`data-index` 仅接受大于 0 且小于 2147483647 的规范十进制整数。
 6. input / textarea 同时声明 confirm/change/blur 时只选择一个完成事件插针；对重复 callback 实现同 native event 对象去重，以及按 pageKey、元素和值约束的有效时间戳窄窗去重；不以真值判断丢弃 0、false、空字符串或空数组。
@@ -202,7 +202,7 @@
 | 0 | 静态完成；端侧验证阻塞 | contract fixtures、package / demo / mock collector 骨架与本地启动记录；仍缺可用 HBuilderX CLI 下的 demo 编译记录 |
 | 1 | 静态完成；端侧验证阻塞 | config / protocol / identity / session / event sequence / plugin registry、page / location state、tracker init 生命周期已有 unit 与 contract 覆盖；identity / session / meta / queue 与 SystemContext 已通过统一 hydration gate 恢复，tracker gate 已完成 bootstrap 排空与 dataCollect 切换，EventComposer 已把可信系统/身份/session/location context 构成后入队，`TrackerRuntime` 已串联 hydration 后的 track、用户属性、A→B 换人 VISIT 与 dataCollect 恢复；公开 `gdp` 已固定单例初始化语义，接入文档已具备，仍缺端侧证明 |
 | 2 | 静态完成；端侧验证阻塞 | ports、identity / session / queue 持久化、collector 请求、单请求 finalizer、有界并发 uploader、后台 force flush、App storage/request/SystemContext adapter 已有 fake 测试；`TrackerRuntime` 已在每次成功的事件路径触发 queue/meta 持久化与 uploader，`createAppTracker` 已把 App storage/request/SystemContext/时钟/时区/方向组合进 runtime；debug 事件数组只在 uploader 的真实派发前从协议事件生成，不含 queue 内部元数据。仍缺网络恢复、后台 deadline 的真实 App 行为与 collector 失败路径集成 |
-| 3 | 静态完成；端侧验证阻塞 | `runtime/app-lifecycle.ts` 已覆盖 launch 不重复发 VISIT、onShow session 续接/超时更新、onHide 的 APP_CLOSED→持久化→force flush 顺序及 dataCollect 恢复后的 VISIT；`runtime/page-lifecycle.ts` 已覆盖 onLoad 冻结 page snapshot、onShow 自动 PAGE、page hide 不推断 APP_CLOSED，方向 resolver 已覆盖标准值/窗口推断/最近值/PORTRAIT 兜底；App/Page bridge 已将宿主参数裁成 JSON 快照，并接入默认开启采集的验收 demo；tabBar bridge 生成版本化 click intent。三端 profile 仍全为 false，缺三端完整请求串联与冷/热启动、导航、后台 collector 接收记录 |
+| 3 | 静态完成；端侧验证阻塞 | `src/core/dataStore/app.ts` 已覆盖 launch 不重复发 VISIT、onShow session 续接/超时更新、onHide 的 APP_CLOSED→持久化→force flush 顺序及 dataCollect 恢复后的 VISIT；`src/core/dataStore/page.ts` 已覆盖 onLoad 冻结 page snapshot、onShow 自动 PAGE、page hide 不推断 APP_CLOSED，方向 resolver 已覆盖标准值/窗口推断/最近值/PORTRAIT 兜底；App/Page bridge 已将宿主参数裁成 JSON 快照，并接入默认开启采集的验收 demo；tabBar bridge 生成版本化 click intent。三端 profile 仍全为 false，缺三端完整请求串联与冷/热启动、导航、后台 collector 接收记录 |
 | 4 | schema v2 代码与受控链路已实现；三端验收待完成 | 已实现完整 SFC/事件表达式 AST、分形态 listener 改写、运行时 `id#eventName`、tabBar 一基 index、双目标隐私短路、逐组件 change 归一与两层去重；测试实际执行转换后的 Vue listener 并通过 HTTP mock collector 断言最终事件。逐组件能力表已接入运行时；Android、iOS、HarmonyOS 的真机请求和服务端接收证据未齐前，所有无埋点能力保持禁用。详见[无埋点发布说明](./autotrack-v2-release.md)。 |
 | 5 | schema v2 发布目录已同步；端侧验证阻塞 | release 包已同步 schema v2 源码和文档，并验证目录白名单、public package metadata、runtime/Vite 双入口、`@vue/compiler-sfc`、`@vue/compiler-dom` 与事件表达式 parser 运行依赖及 Vue 编译器版本一致。仍需干净工程复装、三端编译与真机证据包。 |
 

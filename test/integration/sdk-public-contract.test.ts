@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ProtocolEvent } from '../../core/protocol.js'
-import type { AppRuntimeHost } from '../../platform/app-runtime.js'
-import type { TrackerRuntime } from '../../runtime/tracker.js'
+import type { ProtocolEvent } from '../../src/core/dataStore/protocol.js'
+import type { AppRuntimeHost } from '../../src/platform/index.js'
+import type { TrackerRuntime } from '../../src/core/growingIO.js'
 
 beforeEach(() => {
   vi.useFakeTimers()

@@ -312,11 +312,11 @@ tabBar 不从模板 native event 取 id。页面 lifecycle bridge 将 `onTabItem
 
 | 文件 | 必做改动 |
 |---|---|
-| `autotrack/contract.ts` | 定义 schema v2 的 template / tabbar probe union，加入受限 `elementType`、`pickerRange`，分离最终 normalized call；拒绝旧 v1 与混合字段 |
-| `autotrack/vite.ts` | 使用 `@vue/compiler-sfc` 提取完整 template；删除结构 xpath 递归生成；加入事件表达式 AST 名称推导、分形态 handler 改写、条件分支、`openURL`、change metadata、唯一 import 别名与 warning 透出 |
-| `runtime/autotrack-dispatch.ts` | 分开处理 currentTarget、原始 target 与 primaryTarget；由 `id + eventName` 生成 xpath；实现敏感短路、组件级 change 归一和两层去重 |
-| `runtime/page-bridge.ts` | tabBar 改为 `#onTabItemTap`、一基 index、`pagePath` hyperlink，并改用 schema v2 |
-| `runtime/event-dispatcher.ts` | 保持只接收 normalized call，确认 change 仍裁剪 `index` / `hyperlink` |
+| `src/plugins/gioEventAutoTracking/contract.ts` | 定义 schema v2 的 template / tabbar probe union，加入受限 `elementType`、`pickerRange`，分离最终 normalized call；拒绝旧 v1 与混合字段 |
+| `src/compiler/vite.ts` | 使用 `@vue/compiler-sfc` 提取完整 template；删除结构 xpath 递归生成；加入事件表达式 AST 名称推导、分形态 handler 改写、条件分支、`openURL`、change metadata、唯一 import 别名与 warning 透出 |
+| `src/plugins/gioEventAutoTracking/index.ts` | 分开处理 currentTarget、原始 target 与 primaryTarget；由 `id + eventName` 生成 xpath；实现敏感短路、组件级 change 归一和两层去重 |
+| `src/adapters/uniapp.ts` | tabBar 改为 `#onTabItemTap`、一基 index、`pagePath` hyperlink，并改用 schema v2 |
+| `src/core/dataStore/index.ts` | 保持只接收 normalized call，确认 change 仍裁剪 `index` / `hyperlink` |
 | `package.json` | 将 `@vue/compiler-sfc`、`@vue/compiler-dom` 与事件表达式 AST parser 作为构建侧运行依赖；不得依赖使用方未安装的 devDependency |
 | `scripts/check-release.ts` | 校验 release 包保留全部构建侧运行依赖，不能只检查 `@vue/compiler-dom` |
 | `test/unit/*autotrack*`、`test/unit/page-bridge.test.ts` | 将所有结构 xpath 断言替换为事件标识断言，并新增第 8 节测试向量 |

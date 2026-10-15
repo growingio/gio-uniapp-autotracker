@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { PageStore } from '../../core/page-store.js'
+import { PageStore } from '../../src/core/dataStore/page.js'
 
 describe('PageStore', () => {
   it('同一路由不同实例返回时更新来源，同一实例后台恢复保留来源', () => {

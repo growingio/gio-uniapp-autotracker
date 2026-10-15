@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import { MetaPersistence } from '../../core/meta-persistence.js'
-import type { StoragePort } from '../../core/ports.js'
+import { MetaPersistence } from '../../src/core/storage/index.js'
+import type { StoragePort } from '../../src/types/index.js'
 
 describe('MetaPersistence', () => {
   it('restores and persists the cross-session event sequence', async () => {

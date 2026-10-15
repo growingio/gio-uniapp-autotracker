@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import { dispatchWithFinalizer, type TimerPort } from '../../core/transport-finalizer.js'
-import type { TransportPort, TransportRequest, TransportResult } from '../../core/ports.js'
+import { dispatchWithFinalizer, type TimerPort } from '../../src/core/uploader.js'
+import type { TransportPort, TransportRequest, TransportResult } from '../../src/types/index.js'
 
 const request: TransportRequest = { url: 'https://collector.example', method: 'POST', headers: {}, body: '[]', timeoutMs: 5_000 }
 

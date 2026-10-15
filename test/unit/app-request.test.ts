@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import { AppRequestPort, type AppRequestApi } from '../../platform/app-request.js'
-import type { TransportRequest, TransportResult } from '../../core/ports.js'
+import { AppRequestPort, type AppRequestApi } from '../../src/platform/uni.js'
+import type { TransportRequest, TransportResult } from '../../src/types/index.js'
 
 const request: TransportRequest = { url: 'https://collector.example', method: 'POST', headers: { Accept: 'application/json' }, body: '[]', timeoutMs: 5_000 }
 

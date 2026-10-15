@@ -12,9 +12,6 @@
     "index.ts",
     "autotrack.ts",
     "vite.ts",
-    "core/**/*.ts",
-    "runtime/**/*.ts",
-    "platform/**/*.ts",
-    "autotrack/**/*.ts"
+    "src/**/*.ts"
   ]
 }
