@@ -19,6 +19,7 @@ const system: AppSystemContext = {
   deviceType: 'PHONE', appVersion: '1.0.0', language: 'zh-CN', sdkVersion: '0.1.0',
 }
 
+/** 装配真实页面、会话和事件组件，以验证 PAGE 上下文与采集门控。 */
 function createLifecycle(initialCollection = true, tickingClock = false) {
   let now = 100
   let collect = initialCollection

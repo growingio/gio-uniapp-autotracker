@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 const root = resolve(import.meta.dirname, '../..')
 const { scripts, packageManager } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { scripts: Record<string, string>; packageManager: string }
 
+/** 在临时工程运行真实发布编排，以记录器替代外部副作用并模拟指定步骤失败。 */
 function runGate(command: string, failAt?: string) {
   const directory = mkdtempSync(join(tmpdir(), 'gio-release-gate-'))
   try {

@@ -26,6 +26,7 @@ export type MockCollectorOptions = Readonly<{
   onAcceptedEvents?: (events: readonly Readonly<Record<string, unknown>>[]) => void
 }>
 
+/** 按指定状态发送测试响应；无响应体时保持空响应。 */
 function writeJson(response: ServerResponse, status: number, body?: Record<string, unknown>): void {
   response.statusCode = status
   if (body !== undefined) {
@@ -36,6 +37,7 @@ function writeJson(response: ServerResponse, status: number, body?: Record<strin
   response.end()
 }
 
+/** 完整收集请求字节，供采集协议与正文验证。 */
 async function readBody(request: IncomingMessage): Promise<Buffer> {
   const chunks: Buffer[] = []
   for await (const chunk of request) {
@@ -44,6 +46,7 @@ async function readBody(request: IncomingMessage): Promise<Buffer> {
   return Buffer.concat(chunks)
 }
 
+/** 记录脱敏拒绝摘要并返回固定错误原因，不保存原始业务报文。 */
 function reject(
   requests: CollectorRequestSummary[],
   response: ServerResponse,
@@ -54,6 +57,7 @@ function reject(
   writeJson(response, 400, { accepted: false, reason: rejectReason })
 }
 
+/** 启动仅供本地合成数据验证的采集服务，严格检查路径、请求头、查询参数和事件数组。 */
 export async function createMockCollector(options: MockCollectorOptions = {}): Promise<MockCollector> {
   const requests: CollectorRequestSummary[] = []
   const acceptedStatus = options.acceptedStatus ?? 200
@@ -126,9 +130,11 @@ export async function createMockCollector(options: MockCollectorOptions = {}): P
 
   return {
     baseUrl: `http://${host}:${address.port}`,
+    /** 读取脱敏请求摘要，供集成用例核对采集结果。 */
     get requests() {
       return requests
     },
+    /** 关闭测试服务器并等待资源释放，避免端口泄漏到后续用例。 */
     async close(): Promise<void> {
       server.close()
       await once(server, 'close')

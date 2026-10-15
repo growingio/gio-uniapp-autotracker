@@ -5,7 +5,7 @@ export type GioInitOptions = Readonly<{
   accountId: string
   dataSourceId: string
   serverUrl?: string | null
-  /** Reserved for Web / mini-program profiles. App drops it at this boundary. */
+  /** 为 Web 和小程序配置预留，当前 App 在此边界剥离该字段。 */
   appId?: string | null
   appChannel?: string | null
   appVersion?: string | null
@@ -48,15 +48,17 @@ export type ConfigResult =
 const DEFAULT_SERVER_URL = 'https://napi.growingio.com'
 const APP_DEFAULT_SESSION_TIMEOUT_MS = 30_000
 
+/** 确认初始化参数是普通对象形态，拒绝数组与空值。 */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+/** 归一化必填标识并拒绝未配对代理项，避免后续 URI 或 UTF-8 编码失败。 */
 function nonEmptyString(value: unknown): string | null {
   if (typeof value !== 'string') return null
   const trimmed = value.trim()
-  // A string iterator keeps valid surrogate pairs together. Lone surrogates
-  // would throw later in URI/UTF-8 encoding, after initialization has started.
+  // 字符串迭代可保留合法代理对，未配对代理项必须提前拒绝。
+  // 否则初始化开始后可能在 URI 或 UTF-8 编码阶段抛错。
   for (const character of trimmed) {
     const point = character.codePointAt(0)!
     if (point >= 0xD800 && point <= 0xDFFF) return null
@@ -64,18 +66,20 @@ function nonEmptyString(value: unknown): string | null {
   return trimmed === '' ? null : trimmed
 }
 
+/** 清理可选字符串的首尾空白，将未提供或空白值统一为 null。 */
 function optionalTrimmedString(value: string | null | undefined): string | null {
   if (value === undefined || value === null) return null
   const trimmed = value.trim()
   return trimmed === '' ? null : trimmed
 }
 
+/** 规范采集服务基础地址，拒绝凭据、接口路径、查询参数和片段；兼容缺少 URL 的 App 运行时。 */
 function normalizeServerUrl(value: unknown): string | ConfigErrorCode {
   if (value === undefined || value === null) return DEFAULT_SERVER_URL
   if (typeof value !== 'string' || value.trim() === '') return 'invalid_server_url'
 
-  // App service runtimes do not provide the browser's URL constructor. Parse
-  // only collector origins: no credentials, paths, query, fragments or escapes.
+  // 部分 App 运行时没有浏览器的 URL 构造器，因此仅解析采集服务基础地址。
+  // 不接受凭据、接口路径、查询参数、片段或转义主机。
   const candidate = value.trim().includes('://') ? value.trim() : `https://${value.trim()}`
   if (typeof globalThis.URL === 'function') {
     try {
@@ -96,11 +100,13 @@ function normalizeServerUrl(value: unknown): string | ConfigErrorCode {
   return `${protocol}://${host}${suffix}`
 }
 
+/** 仅对未提供的布尔配置补默认值，显式非法值返回对应错误。 */
 function normalizeBoolean(value: unknown, fallback: boolean, error: ConfigErrorCode): boolean | ConfigErrorCode {
   if (value === undefined) return fallback
   return typeof value === 'boolean' ? value : error
 }
 
+/** 将分钟单位的会话配置换算为毫秒，拒绝非正数及换算溢出。 */
 function normalizeSessionPolicy(value: unknown): SessionPolicy | ConfigErrorCode {
   if (value === undefined) return { timeoutMs: APP_DEFAULT_SESSION_TIMEOUT_MS }
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return 'invalid_session_expires'
@@ -109,10 +115,7 @@ function normalizeSessionPolicy(value: unknown): SessionPolicy | ConfigErrorCode
   return { timeoutMs }
 }
 
-/**
- * The only module that reads raw init options. A failed result has no side effects,
- * so callers can safely let an integrator correct options and retry initialization.
- */
+/** 统一读取和校验原始初始化配置；失败不产生副作用，修正参数后可再次尝试初始化。 */
 export function normalizeInitOptions(input: unknown): ConfigResult {
   if (!isRecord(input)) return { ok: false, code: 'invalid_options' }
 

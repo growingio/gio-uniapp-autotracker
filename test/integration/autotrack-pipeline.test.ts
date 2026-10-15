@@ -12,6 +12,7 @@ const system: AppSystemContext = {
   networkState: 'WIFI', screenWidth: 1080, screenHeight: 1920, deviceBrand: 'Google', deviceModel: 'Pixel',
   deviceType: 'PHONE', appVersion: '1.0.0', language: 'zh-CN', sdkVersion: '0.1.0',
 }
+/** 创建具备持久队列语义的内存存储端口，用于受控完整链路。 */
 function storage(): StoragePort {
   const entries = new Map<string, string>()
   return {
@@ -21,6 +22,7 @@ function storage(): StoragePort {
     remove: async (_, key) => { entries.delete(key); return { kind: 'ok' } },
   }
 }
+/** 提供稳定设备、时间和标识依赖，使报文断言可重复。 */
 function trackerDependencies() {
   return {
     storage: storage(), systemContext: { load: async () => system }, clock: { now: () => 100 },
@@ -28,6 +30,7 @@ function trackerDependencies() {
     orientation: () => 'PORTRAIT' as const,
   }
 }
+/** 注册并初始化 SDK，再建立 App 与首屏页面上下文。 */
 async function show(tracker: TrackerRuntime) {
   tracker.registerPlugins({ name: 'gioEventAutoTracking' })
   tracker.init({ accountId: 'account', dataSourceId: 'source' })
@@ -68,7 +71,7 @@ describe('SFC to mock collector pipeline', () => {
       tracker.setDataCollect(false)
       now = 1_000
       tracker.setDataCollect(true)
-      // A wrapper in the old timestamp window still belongs to the replacement PAGE.
+      // 即使包装事件仍位于旧时间窗内，也应关联恢复后新建的 PAGE。
       fixture.fire(0, 'onTap', { ...native, timeStamp: 101 })
       const read = vi.fn(() => ({ value: true }))
       fixture.fire(0, 'onChange', { currentTarget: { dataset: {} }, get detail() { return read() } })
@@ -135,8 +138,8 @@ describe('SFC to mock collector pipeline', () => {
       fixture.fire(3, 'onChange', { currentTarget: { id: 'banner' }, detail: { current: 1, source: 'autoplay' } })
       fixture.fire(1, 'onClick', { currentTarget: { dataset: { src: '/docs' } } })
       createPageLifecycleBridge(tracker, 'home#1').onTabItemTap({ index: 0, text: 'Home', pagePath: 'pages/home/index' })
-      // This end-to-end test validates the documented immediate background flush;
-      // the ordinary aggregation window is exercised with controlled timers separately.
+      // 此完整链路用例验证 App 退后台时立即刷新的行为。
+      // 并发、超时和退避等调度边界由受控定时器用例分别验证。
       expect(tracker.onAppHide()).toBe(true)
       await expect.poll(() => received.filter((event) => event.eventType === 'VIEW_CLICK' || event.eventType === 'VIEW_CHANGE').length).toBe(10)
       const views = received.filter((event) => event.eventType === 'VIEW_CLICK' || event.eventType === 'VIEW_CHANGE')

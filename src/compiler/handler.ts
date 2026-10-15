@@ -1,9 +1,11 @@
 import { parseExpression } from '@babel/parser'
 
 export type AstNode = { type: string; start?: number | null; end?: number | null; [key: string]: unknown }
+/** 识别带 type 字段的 AST 节点，供容错遍历使用。 */
 export function node(value: unknown): AstNode | null {
   return typeof value === 'object' && value !== null && typeof (value as AstNode).type === 'string' ? value as AstNode : null
 }
+/** 递归访问 AST 节点与数组，跳过位置、注释和词法标记等非语义信息。 */
 export function walk(value: unknown, visit: (value: AstNode) => void): void {
   if (Array.isArray(value)) { value.forEach((entry) => walk(entry, visit)); return }
   const current = node(value)
@@ -11,9 +13,11 @@ export function walk(value: unknown, visit: (value: AstNode) => void): void {
   visit(current)
   for (const [key, child] of Object.entries(current)) if (!['loc', 'comments', 'leadingComments', 'trailingComments', 'innerComments', 'tokens'].includes(key)) walk(child, visit)
 }
+/** 按 TypeScript 表达式语法解析监听器；解析失败时返回 null。 */
 export function expression(source: string): AstNode | null {
   try { return parseExpression(source, { plugins: ['typescript'] }) as unknown as AstNode } catch { return null }
 }
+/** 提取普通标识符或静态成员路径；计算属性和可选访问不作猜测。 */
 export function memberPath(value: unknown): string | null {
   const current = node(value)
   if (current?.type === 'Identifier') return String(current.name)
@@ -22,6 +26,7 @@ export function memberPath(value: unknown): string | null {
   const property = node(current.property)
   return object !== null && property?.type === 'Identifier' ? `${object}.${String(property.name)}` : null
 }
+/** 识别当前派发器的第二版结构探针调用，避免重复插桩。 */
 export function containsProbe(root: AstNode, dispatcher: string): boolean {
   let found = false
   walk(root, (entry) => {
@@ -37,6 +42,7 @@ export function containsProbe(root: AstNode, dispatcher: string): boolean {
   return found
 }
 
+/** 排除多分支、异步、可选调用等无法保证原求值语义的节点。 */
 function safeLeaf(root: AstNode): boolean {
   let safe = true
   walk(root, (entry) => {
@@ -51,6 +57,7 @@ function safeLeaf(root: AstNode): boolean {
 /** 只复制字面量元数据；动态绑定由原模板求值，事件阶段从原生 dataset 读取。 */
 export function metadataExpression(source: string): string | null {
   const root = expression(source)
+  /** 递归确认元数据仅含可复制字面量，拒绝属性访问器、展开和动态求值。 */
   const literal = (value: AstNode | null): boolean => {
     if (value === null) return false
     if (['StringLiteral', 'NumericLiteral', 'BooleanLiteral', 'NullLiteral'].includes(value.type)) return true
@@ -66,6 +73,7 @@ export function metadataExpression(source: string): string | null {
 }
 
 type Branch = Readonly<{ name: string; original: string; fallback: boolean }>
+/** 剥离仅影响类型的包装，以沿用 Vue 对函数引用的识别语义。 */
 function unwrapTypeExpression(root: AstNode): AstNode {
   // Vue 会穿透这些 TypeScript 包装识别函数引用，不能误改成返回函数的事件闭包。
   const wrappers = ['TSAsExpression', 'TSTypeAssertion', 'TSNonNullExpression', 'TSInstantiationExpression', 'TSSatisfiesExpression']
@@ -78,11 +86,12 @@ function unwrapTypeExpression(root: AstNode): AstNode {
   return current
 }
 
+/** 分析一个可安全改写的业务分支，提取事件名及原源码范围。 */
 function branch(root: AstNode, source: string, nativeName: string, inline = false): Branch | null {
   if (!safeLeaf(root)) return null
   const original = source.slice(root.start ?? 0, root.end ?? source.length)
   const reference = memberPath(unwrapTypeExpression(root))
-  // 函数引用由 Vue 决定求值、缓存、空值及多 handler 行为，不能擅自替换成调用。
+  // 函数引用由 Vue 决定求值、缓存、空值及多个处理函数的行为，不能擅自替换成调用。
   if (reference !== null) return null
   const calls: AstNode[] = []
   const functions: AstNode[] = []
@@ -107,6 +116,7 @@ function branch(root: AstNode, source: string, nativeName: string, inline = fals
   return { name, original, fallback: calls.length === 0 }
 }
 
+/** 在安全监听器中插入隔离异常的探针，保留业务参数、this、返回值与条件执行。无法保证语义时返回 null。 */
 export function rewriteHandler(source: string, nativeName: string, _dispatcher: string, probe: (name: string, event?: string) => string): Readonly<{ code: string; fallback: boolean }> | null {
   const root = expression(source)
   if (root === null) return null

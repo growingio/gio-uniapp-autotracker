@@ -14,6 +14,7 @@ export const metadata = JSON.parse(await readFile(join(root, 'package.json'), 'u
 }
 export const runtimeEntries = ['index.js', 'index.d.ts', 'autotrack.js', 'autotrack.d.ts', 'src']
 
+/** 递归列举目录中的普通文件并排序，拒绝符号链接等非普通交付项。 */
 export async function files(directory: string, prefix = ''): Promise<string[]> {
   const output: string[] = []
   for (const entry of await readdir(join(directory, prefix), { withFileTypes: true })) {
@@ -25,11 +26,13 @@ export async function files(directory: string, prefix = ''): Promise<string[]> {
   return output.sort()
 }
 
+/** 计算交付目录中每个文件的摘要，用于双渠道与实际安装文件核对。 */
 export async function hashes(directory: string): Promise<Record<string, string>> {
   return Object.fromEntries(await Promise.all((await files(directory)).map(async (file) => [file,
     createHash('sha256').update(await readFile(join(directory, file))).digest('hex')])))
 }
 
+/** 对源码、测试、文档和发布配置共同计算构建依据，阻止复用过期交付包。 */
 export async function sourceHash(): Promise<string> {
   const inputs = ['index.ts', 'autotrack.ts', 'vite.ts', 'package.json', 'pnpm-lock.yaml', 'tsconfig.json', 'tsconfig.build.json', 'tsconfig.dev.json', 'vitest.config.ts', 'README.md', 'LICENSE']
   // 测试与门禁配置也属于本次构建依据，改动后不能沿用旧交付包的检查结果。

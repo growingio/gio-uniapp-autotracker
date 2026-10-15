@@ -19,8 +19,11 @@ assert.equal(release.prerelease, policy.prerelease)
 const archive = join(archivesDir, release.npmFile)
 assert.equal(`sha512-${createHash('sha512').update(await readFile(archive)).digest('base64')}`, release.npmIntegrity)
 const result = await publishNpmRelease(sdkName, policy, release.npmIntegrity, {
+  /** 使用标准网络接口查询发布包仓库元信息，供幂等发布判断。 */
   fetch: (url) => fetch(url, { signal: AbortSignal.timeout(15_000) }),
+  /** 在有限轮询之间等待，避免过密查询包仓库。 */
   delay: () => delay(1_000),
+  /** 使用已验证的包和发布渠道执行 npm 发布，不在此重新构建产物。 */
   publish: () => { execFileSync('npm', ['publish', archive, '--registry', npmRegistry, '--tag', policy.tag, '--access', 'public', '--provenance', '--ignore-scripts'], { stdio: 'inherit' }) },
 })
 console.log(`npm_${result}:${policy.version}:${policy.tag}`)

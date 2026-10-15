@@ -34,6 +34,7 @@ const system: AppSystemContext = {
   deviceType: 'PHONE', appVersion: '1.0.0', language: 'zh-CN', sdkVersion: '0.1.0',
 }
 
+/** 创建可调时间、同意状态和能力配置的运行时，供跨模块状态流程验证。 */
 function createTracker(dataCollect = true, autoTracking = false, debug = false, logger?: LoggerPort) {
   let now = 100
   const tracker = new TrackerRuntime({

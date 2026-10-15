@@ -1,7 +1,7 @@
 /**
  * 传统 uni-app App 1.0 的可执行字段契约。
  *
- * 此文件是 Protocol 的测试输入，不是 event builder；阶段 1 不得在此处
+ * 此文件是协议的测试输入，不是事件构造器；阶段 1 不得在此处
  * 增加运行时代码或绕过本文件自行定义字段。
  */
 export const APP_EVENT_TYPES = [
@@ -91,7 +91,7 @@ export const EVENT_SEQUENCE_EVENT_TYPES = [
   'VIEW_CHANGE',
 ] as const satisfies readonly AppEventType[]
 
-/** These protocol fields are App-capable, but explicitly excluded from the 1.0 base SDK. */
+/** 这些协议字段允许用于 App，但明确不属于 1.0 基础 SDK 的交付范围。 */
 export const APP_V1_EXCLUDED_FIELDS = [
   'urlScheme',
   'idfa',

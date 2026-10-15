@@ -7,8 +7,11 @@ export const npmRegistry = 'https://registry.npmjs.org/'
 
 /** 只发布一次；失败重跑先核对不可覆盖的版本内容，再检查渠道是否已前进。 */
 export async function publishNpmRelease(name: string, policy: Policy, integrity: string, io: {
+  /** 读取包仓库元信息，返回包含 HTTP 状态的标准响应。 */
   fetch: (url: string) => Promise<Response>
+  /** 执行一次已验证产物的发布，重试检查不能再次触发此方法。 */
   publish: () => void
+  /** 在有限包仓库复检之间等待。 */
   delay: () => Promise<void>
 }): Promise<'published' | 'already-published'> {
   const versionUrl = `${npmRegistry}${name}/${policy.version}`
@@ -27,7 +30,7 @@ export async function publishNpmRelease(name: string, policy: Policy, integrity:
   } else if (tagsResponse.status !== 404) throw new Error(`registry_tags_failed:${tagsResponse.status}`)
   if (!exists) io.publish()
 
-  // registry/CDN 可短暂延迟；只重试读校验，不能因此重复执行 publish。
+  // 包仓库/CDN 可短暂延迟；只重试读校验，不能因此重复执行发布。
   for (let attempt = 0; attempt < 4; attempt++) {
     const verification = await io.fetch(versionUrl)
     const tagsCheck = await io.fetch(tagsUrl)

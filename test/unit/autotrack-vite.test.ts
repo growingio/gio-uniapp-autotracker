@@ -5,6 +5,7 @@ import { gioUniappAutoTrack, transformAutoTrackSfc, transformAutoTrackTemplate }
 import { mountAutoTrackSfc } from '../support/autotrack-fixture.js'
 import { normalizeAutoTrackCall } from '../../src/plugins/gioEventAutoTracking/index.js'
 
+/** 解析转换后模板并提取监听器源码，避免依赖属性转义后的原文本。 */
 function handlers(code: string): string[] {
   const result: string[] = []
   const visit = (children: ReturnType<typeof parse>['children']): void => {
@@ -16,6 +17,7 @@ function handlers(code: string): string[] {
   visit(parse(code).children)
   return result
 }
+/** 将给定模板和可选业务脚本组合为待测 SFC。 */
 const source = (template: string, script = 'export default { methods: { save(e) { return e }, cancel(e) { return e } } }') => `<template>${template}</template><script>${script}</script>`
 
 describe('schema v2 Vue instrumentation', () => {
@@ -68,7 +70,7 @@ describe('schema v2 Vue instrumentation', () => {
     const dispatch = vi.fn((probe, event) => normalizeAutoTrackCall(probe, event))
     const fixture = mountAutoTrackSfc(`<script setup>import { business } from 'fixture'; const attributes = { 'data-growing-track': null }; const attribute = 'data-growing-track'; const marker = null</script><template><switch data-growing-track ${binding} @change="business($event)"/></template>`, dispatch, { fixture: { business } })
     try {
-      // Removing the rendered attribute also removes it from the native dataset.
+      // 渲染属性被移除后，原生 dataset 中也不会再有对应授权。
       expect(fixture.elements().find(element => element.type === 'switch')?.props['data-growing-track']).toBeNull()
       const event = { currentTarget: { dataset: {} }, get detail() { return read() } }
       expect(fixture.fire(0, 'onChange', event)).toBe(event)

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { SessionPersistence } from '../../src/core/storage/index.js'
 import type { StoragePort } from '../../src/types/index.js'
 
+/** 模拟会话存储结果并记录仅针对当前会话键的清理。 */
 function port(value: Awaited<ReturnType<StoragePort['read']>>): { port: StoragePort; removed: () => number; writes: string[] } {
   let removals = 0
   const writes: string[] = []

@@ -22,7 +22,7 @@ command('setOptions', { dataCollect: true })
 gdp('clearUserId')
 gdp('setLocation', 30.2741, 120.1551)
 
-// @ts-expect-error only published gdp command names are accepted.
+// @ts-expect-error 只允许使用交付的 gdp 命令名称。
 command('getTracker')
-// @ts-expect-error customer attributes are scalar values or scalar arrays.
+// @ts-expect-error 客户属性只接受基础值或基础值数组。
 command('setUserAttributes', { nested: { unsafe: true } })

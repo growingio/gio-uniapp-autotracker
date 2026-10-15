@@ -72,6 +72,7 @@ describe('installUniAppLifecycle', () => {
 })
 
 
+/** 捕获全局 mixin 和标题拦截器，验证标题更新归属及业务回调保留。 */
 function titleFixture() {
   let hooks!: HookSet
   let interceptor!: { invoke: (options: unknown) => void }

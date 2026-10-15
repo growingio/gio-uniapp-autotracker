@@ -7,7 +7,7 @@ export type Identity = Readonly<{
   deviceId: string
   userId: string | null
   userKey: string | null
-  /** Internal comparison identity retained through logout; never emitted as event userId. */
+  /** 退出登录后仍保留的内部比较身份，不能作为事件 userId 上报。 */
   lastUserId?: string | null
 }>
 
@@ -22,17 +22,20 @@ export type IdentityUpdate = Readonly<{
   changed: boolean
 }>
 
+/** 检查身份信封是否为非数组对象。 */
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+/** 按码点验证身份长度并拒绝未配对 UTF-16 代理项。 */
 function isWithinLimit(value: string): boolean {
   const characters = Array.from(value)
-  // The shared storage codec cannot encrypt unpaired UTF-16; reject before mutating identity.
+  // 身份编码器不接受未配对的 UTF-16 代理项，必须在改变身份前拒绝。
   return characters.length <= IDENTITY_VALUE_MAX_LENGTH
     && characters.every((character) => character.length > 1 || character.charCodeAt(0) < 0xd800 || character.charCodeAt(0) > 0xdfff)
 }
 
+/** 校验设备标识、登录字段和最近身份，防止损坏缓存进入运行时。 */
 function validIdentity(value: unknown): value is Identity {
   return isRecord(value)
     && typeof value.deviceId === 'string'
@@ -45,13 +48,15 @@ function validIdentity(value: unknown): value is Identity {
     && (value.lastUserId === undefined || value.lastUserId === null || typeof value.lastUserId === 'string' && isWithinLimit(value.lastUserId))
 }
 
+/** 比较出站身份与内部最近登录身份，避免无变化的状态写入。 */
 function sameIdentity(left: Identity, right: Identity): boolean {
   return left.deviceId === right.deviceId && left.userId === right.userId && left.userKey === right.userKey && left.lastUserId === right.lastUserId
 }
 
-/** Writes versioned JSON, protecting every populated identity field separately. */
+/** 写入带版本的 JSON 信封，分别保护每个已填充的身份字段。 */
 export function serializeIdentityRecord(identity: Identity, dataSourceId: string): string {
   if (!validIdentity(identity)) throw new Error('identity_invalid')
+  /** 保留匿名 null，按数据源分别保护已填充的身份字段。 */
   const protect = (value: string | null): string | null => value === null ? null : encryptIdentityValue(value, dataSourceId)
   return JSON.stringify({
     version: 1,
@@ -66,7 +71,7 @@ export function serializeIdentityRecord(identity: Identity, dataSourceId: string
   })
 }
 
-/** Accepts the old plain envelope once so a later successful write can migrate it. */
+/** 兼容旧明文信封，后续成功写入时迁移到当前格式。 */
 export function readIdentityRecord(serialized: string, dataSourceId: string): IdentityRecordRead {
   let record: unknown
   try {
@@ -81,7 +86,8 @@ export function readIdentityRecord(serialized: string, dataSourceId: string): Id
   }
   if (record.cipher !== GIO_IDENTITY_CIPHER) return { kind: 'corrupt' }
 
-  // A stored null is anonymous; failure to decrypt a populated field is corruption.
+  // 存储的 null 表示匿名；已填充字段解码失败则表示记录损坏。
+  /** 区分合法匿名 null 与解码失败的 undefined，避免损坏身份被误当匿名恢复。 */
   const decrypt = (value: unknown): string | null | undefined => value === null ? null : decryptIdentityValue(value, dataSourceId) ?? undefined
   const hasLastUserId = Object.prototype.hasOwnProperty.call(record.value, 'lastUserId')
   const lastUserId = hasLastUserId ? decrypt(record.value.lastUserId) : undefined
@@ -95,7 +101,7 @@ export function readIdentityRecord(serialized: string, dataSourceId: string): Id
   return validIdentity(identity) ? { kind: 'current', identity } : { kind: 'corrupt' }
 }
 
-/** Applies public `setUserId` semantics without deciding when an adapter persists the result. */
+/** 应用公开 setUserId 语义，持久化时机由运行时决定。 */
 export function updateIdentity(
   current: Identity,
   userId: unknown,
@@ -134,14 +140,17 @@ export type SessionTransition = Readonly<{
 
 export type SessionIdFactory = () => string
 
+/** 确认会话观察时间为有限非负数。 */
 function validTimestamp(value: number): boolean {
   return Number.isFinite(value) && value >= 0
 }
 
+/** 以非空字符串判断登录状态，保持与身份更新的空字符串退出语义一致。 */
 function isLoggedIn(value: string | null | undefined): boolean {
   return typeof value === 'string' && value.length > 0
 }
 
+/** 校验新会话标识并构造带变更原因的初始快照。 */
 function createSession(idFactory: SessionIdFactory, reason: SessionStartReason): SessionTransition {
   const sessionId = idFactory()
   if (typeof sessionId !== 'string' || sessionId.trim().length === 0) {
@@ -154,14 +163,12 @@ function createSession(idFactory: SessionIdFactory, reason: SessionStartReason):
   }
 }
 
-/**
- * The session state machine deliberately has no host-storage dependency.
- * The App adapter persists `snapshot` only after a successful storage write.
- */
+/** 会话状态机不依赖宿主存储，快照持久化由运行时经存储模块负责。 */
 export class SessionManager {
   private snapshot: SessionSnapshot | null
   private lastUserId: string | null
 
+  /** 注入会话策略与标识工厂，并恢复已有会话及最近登录身份。 */
   public constructor(
     private readonly policy: SessionPolicy,
     private readonly idFactory: SessionIdFactory,
@@ -172,11 +179,12 @@ export class SessionManager {
     this.lastUserId = isLoggedIn(initialLastUserId) ? initialLastUserId : null
   }
 
+  /** 读取当前会话快照，不触发续期或新建。 */
   public current(): SessionSnapshot | null {
     return this.snapshot
   }
 
-  /** A new App JS runtime is a cold start even when a prior session was persisted moments ago. */
+  /** 新的 App JS 运行期视为冷启动，即使历史会话刚刚持久化也要重建。 */
   public onProcessLaunch(): SessionTransition {
     const reason: SessionStartReason = this.snapshot === null || this.snapshot.sessionId.trim() === ''
       ? 'initial'
@@ -184,7 +192,7 @@ export class SessionManager {
     return this.replace(createSession(this.idFactory, reason))
   }
 
-  /** Handles App.onShow. Equality with the timeout continues the same session. */
+  /** 处理 App.onShow；后台间隔恰好等于超时时间时仍沿用原会话。 */
   public resume(now: number): SessionTransition {
     if (!validTimestamp(now)) throw new Error('invalid_session_timestamp')
 
@@ -201,7 +209,7 @@ export class SessionManager {
     return { snapshot: this.snapshot, startedNew: false, reason: null }
   }
 
-  /** Handles App.onHide: record the time but retain the session for a hot resume. */
+  /** 处理 App.onHide，记录离开时间并保留会话，以供热启动判断。 */
   public hide(now: number): SessionSnapshot | null {
     if (!validTimestamp(now)) throw new Error('invalid_session_timestamp')
     if (this.snapshot === null) return null
@@ -209,7 +217,7 @@ export class SessionManager {
     return this.snapshot
   }
 
-  /** First login and logout preserve the session; a different login after logout still renews it. */
+  /** 首次登录与退出沿用会话；退出后换账号登录仍需新建会话。 */
   public onUserIdChange(previousUserId: string | null | undefined, nextUserId: string | null | undefined): SessionTransition {
     const previous = isLoggedIn(previousUserId) ? previousUserId : this.lastUserId
     if (isLoggedIn(nextUserId)) this.lastUserId = nextUserId ?? null
@@ -221,11 +229,12 @@ export class SessionManager {
     return { snapshot: this.snapshot, startedNew: false, reason: null }
   }
 
-  /** Privacy consent false → true always starts a fresh visit/session. */
+  /** 采集同意从 false 切换为 true 时，建立新的访问与会话。 */
   public onCollectionResumed(): SessionTransition {
     return this.replace(createSession(this.idFactory, 'collection_resumed'), true)
   }
 
+  /** 提交新会话；后台身份或采集变化时可保留原离开时间。 */
   private replace(transition: SessionTransition, preserveCloseTime = false): SessionTransition {
     if (transition.snapshot === null) throw new Error('session_transition_missing_snapshot')
     // 后台更新身份或采集开关不会让 App 回到前台，必须保留离开时间。
@@ -238,10 +247,11 @@ export class SessionManager {
 
 export type Location = Readonly<{ latitude: number; longitude: number }>
 
-/** Memory-only explicit business location; it never requests a permission or touches storage. */
+/** 显式业务位置仅保存在内存中，不请求权限，也不读写存储。 */
 export class LocationState {
   private location: Location | null = null
 
+  /** 仅接受有限且未越界的经纬度，合法零值保留；失败不覆盖旧位置。 */
   public set(latitude: unknown, longitude: unknown): boolean {
     if (typeof latitude !== 'number' || typeof longitude !== 'number'
       || !Number.isFinite(latitude) || !Number.isFinite(longitude)
@@ -250,10 +260,12 @@ export class LocationState {
     return true
   }
 
+  /** 清除仅内存保存的位置，不调用宿主定位或存储。 */
   public clear(): void {
     this.location = null
   }
 
+  /** 返回位置副本，避免调用方修改内部状态。 */
   public current(): Location | null {
     return this.location === null ? null : { ...this.location }
   }

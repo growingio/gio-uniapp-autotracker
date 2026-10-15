@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { EventQueue } from '../../src/core/queue.js'
 import type { ProtocolEvent } from '../../src/core/dataStore/protocol.js'
 
+/** 构造字段齐全且序号可控的协议事件，供容量和批次边界验证。 */
 function event(number: number, value = ''): ProtocolEvent {
   return { eventType: 'CUSTOM', eventSequenceId: number, eventName: `event_${number}`, value } as ProtocolEvent
 }

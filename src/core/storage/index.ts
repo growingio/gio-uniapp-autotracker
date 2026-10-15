@@ -12,6 +12,7 @@ export type StorageKeys = Readonly<{
   queue: string
 }>
 
+/** 为同一数据源生成身份、会话、序号和队列的独立存储键。 */
 export function storageKeys(dataSourceId: string): StorageKeys {
   const prefix = `${GIO_STORAGE_PREFIX}${dataSourceId}:`
   return { identity: `${prefix}identity`, session: `${prefix}session`, meta: `${prefix}meta`, queue: `${prefix}queue:v1` }
@@ -24,19 +25,21 @@ export type IdentityHydration = Readonly<{
 
 export type DeviceIdFactory = () => string
 
+/** 调用内部设备标识工厂创建匿名身份，拒绝空标识。 */
 function generatedIdentity(factory: DeviceIdFactory): Identity {
   const deviceId = factory()
   if (typeof deviceId !== 'string' || deviceId.length === 0) throw new Error('device_id_factory_returned_empty')
   return { deviceId, userId: null, userKey: null }
 }
 
-/** IDs issued by the first App preview builds were not UUIDs and must not survive this migration. */
+/** 早期 App 预览版本生成的设备标识不是 UUID，迁移时需替换。 */
 function isLegacyAppGeneratedDeviceId(deviceId: string): boolean {
   return /^device-[a-z0-9]+-[a-z0-9]+$/i.test(deviceId)
 }
 
-/** Restores one identity record and only ever deletes this SDK's namespace key. */
+/** 恢复一份身份记录，损坏清理仅限本 SDK 当前命名空间的键。 */
 export class IdentityPersistence {
+  /** 绑定数据源命名空间、宿主存储和设备标识工厂。 */
   public constructor(
     private readonly storage: StoragePort,
     private readonly key: string,
@@ -44,6 +47,7 @@ export class IdentityPersistence {
     private readonly deviceIdFactory: DeviceIdFactory,
   ) {}
 
+  /** 恢复并迁移有效身份；缺失或损坏时生成新身份，损坏清理仅限当前键。 */
   public async hydrate(): Promise<IdentityHydration> {
     const read = await this.storage.read('state', this.key)
     if (read.kind === 'missing') return this.generateAndPersist('generated')
@@ -65,21 +69,23 @@ export class IdentityPersistence {
     return this.persistDecodedIdentity(decoded.identity, 'restored')
   }
 
+  /** 按当前身份信封编码后写入对应存储键。 */
   public persist(identity: Identity): Promise<StorageWrite> {
     return this.storage.write('state', this.key, serializeIdentityRecord(identity, this.dataSourceId))
   }
 
-  /** A first-run identity must survive the next cold start; a failed best-effort write never blocks init. */
+  /** 首次生成身份后尽力持久化，使下次冷启动可恢复；写入失败不阻塞初始化。 */
   private async generateAndPersist(source: 'generated' | 'corrupt'): Promise<IdentityHydration> {
     const identity = generatedIdentity(this.deviceIdFactory)
     try {
       await this.persist(identity)
     } catch {
-      // Storage failures are handled as unavailable on the next hydration attempt.
+      // 写入失败不阻塞初始化，下次启动按实际存储结果重新恢复。
     }
     return { identity, source }
   }
 
+  /** 迁移旧明文或预览版设备标识；有效当前身份不做无意义重写。 */
   private async persistDecodedIdentity(identity: Identity, source: 'legacy' | 'restored'): Promise<IdentityHydration> {
     if (!isLegacyAppGeneratedDeviceId(identity.deviceId)) {
       if (source === 'legacy') await this.persist(identity)
@@ -90,7 +96,7 @@ export class IdentityPersistence {
     try {
       await this.persist(migrated)
     } catch {
-      // The UUID is still used for this process; storage failures are handled on next hydration.
+      // 当前进程仍使用新 UUID，下次启动按实际存储结果重新恢复。
     }
     return { identity: migrated, source: 'generated' }
   }
@@ -98,6 +104,7 @@ export class IdentityPersistence {
 
 export type SessionHydration = Readonly<{ snapshot: SessionSnapshot | null; source: 'restored' | 'missing' | 'corrupt' | 'unavailable' }>
 
+/** 校验非空会话标识及有效后台时间，拒绝不完整的缓存结构。 */
 function validSessionSnapshot(value: unknown): value is SessionSnapshot {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
   const record = value as Readonly<Record<string, unknown>>
@@ -105,14 +112,17 @@ function validSessionSnapshot(value: unknown): value is SessionSnapshot {
     && (record.lastCloseTime === null || (typeof record.lastCloseTime === 'number' && Number.isFinite(record.lastCloseTime) && record.lastCloseTime >= 0))
 }
 
+/** 将会话快照封装为带版本的持久记录。 */
 function encodeSession(snapshot: SessionSnapshot): string {
   return JSON.stringify({ version: 1, expiresAt: null, value: snapshot })
 }
 
-/** Session failure is isolated from identity/meta and never triggers broad host-storage cleanup. */
+/** 会话故障与身份、序号记录隔离，不执行大范围宿主存储清理。 */
 export class SessionPersistence {
+  /** 绑定会话专属存储键，使会话故障与其他状态隔离。 */
   public constructor(private readonly storage: StoragePort, private readonly key: string) {}
 
+  /** 恢复合法会话信封，损坏时仅删除当前会话记录并返回空快照。 */
   public async hydrate(): Promise<SessionHydration> {
     const read = await this.storage.read('state', this.key)
     if (read.kind === 'missing') return { snapshot: null, source: 'missing' }
@@ -134,6 +144,7 @@ export class SessionPersistence {
     }
   }
 
+  /** 先验证会话快照，再写入带版本的记录；非法值不修改存储。 */
   public persist(snapshot: SessionSnapshot): Promise<StorageWrite> {
     if (!validSessionSnapshot(snapshot)) return Promise.resolve({ kind: 'failed', message: 'invalid_session_snapshot' })
     return this.storage.write('state', this.key, encodeSession(snapshot))
@@ -142,16 +153,19 @@ export class SessionPersistence {
 
 export type MetaHydration = Readonly<{ snapshot: EventSequenceSnapshot; source: 'restored' | 'missing' | 'corrupt' | 'unavailable' }>
 
+/** 确认全局序号为非负安全整数。 */
 function validMetaSnapshot(value: unknown): value is EventSequenceSnapshot {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
   const sequence = (value as Record<string, unknown>).eventSequenceId
   return typeof sequence === 'number' && Number.isSafeInteger(sequence) && sequence >= 0
 }
 
-/** Persists the global sequence separately so identity/session failures cannot reset it. */
+/** 独立持久化全局序号，避免身份或会话故障导致编号重置。 */
 export class MetaPersistence {
+  /** 绑定事件序号专属存储键。 */
   public constructor(private readonly storage: StoragePort, private readonly key: string) {}
 
+  /** 独立恢复事件序号；缺失或不可用时从零开始，损坏时清理当前键。 */
   public async hydrate(): Promise<MetaHydration> {
     const read = await this.storage.read('state', this.key)
     if (read.kind === 'missing') return { snapshot: { eventSequenceId: 0 }, source: 'missing' }
@@ -169,11 +183,13 @@ export class MetaPersistence {
     }
   }
 
+  /** 只持久化合法的序号快照，避免污染下次启动状态。 */
   public persist(snapshot: EventSequenceSnapshot): Promise<StorageWrite> {
     if (!validMetaSnapshot(snapshot)) return Promise.resolve({ kind: 'failed', message: 'invalid_meta_snapshot' })
     return this.storage.write('state', this.key, JSON.stringify({ version: 1, expiresAt: null, value: snapshot }))
   }
 
+  /** 删除损坏的序号记录并明确返回重置来源。 */
   private async corrupt(): Promise<MetaHydration> {
     await this.storage.remove('state', this.key)
     return { snapshot: { eventSequenceId: 0 }, source: 'corrupt' }
@@ -184,23 +200,27 @@ type PersistedQueue = Readonly<{ version: 1; revision: number; entries: readonly
 
 export type QueueHydration = 'restored' | 'missing' | 'corrupt' | 'unavailable'
 
+/** 初步检查队列信封的版本、修订号和条目数组，具体事件由队列继续验证。 */
 function validRecord(value: unknown): value is PersistedQueue {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
   const record = value as Readonly<Record<string, unknown>>
   return record.version === 1 && Number.isSafeInteger(record.revision) && typeof record.entries === 'object' && Array.isArray(record.entries)
 }
 
+/** 将队列快照及其修订号编码到同一 JSON 信封。 */
 function encodeQueue(revision: number, entries: readonly QueueEntry[]): string {
   return JSON.stringify({ version: 1, revision, entries })
 }
 
-/** Serializes queue snapshots and advances revision only after a successful host write. */
+/** 串行写入队列快照，仅在宿主写入成功后推进修订号。 */
 export class QueuePersistence {
   private revision = 0
   private writes: Promise<void> = Promise.resolve()
 
+  /** 绑定队列存储键，并建立按顺序执行的写入链。 */
   public constructor(private readonly storage: StoragePort, private readonly key: string) {}
 
+  /** 完整校验后恢复队列与修订号，损坏记录仅在本键范围内清理。 */
   public async hydrate(queue: EventQueue): Promise<QueueHydration> {
     const read = await this.storage.read('queue', this.key)
     if (read.kind === 'missing') return 'missing'
@@ -221,8 +241,10 @@ export class QueuePersistence {
     }
   }
 
+  /** 捕获调用时快照并串行写入，仅在宿主写入成功后推进修订号。 */
   public persist(queue: EventQueue): Promise<StorageWrite> {
     const entries = queue.snapshot()
+    /** 在串行写入真正结算前保留安全的结果回调占位。 */
     let resolveResult: (result: StorageWrite) => void = () => undefined
     const result = new Promise<StorageWrite>((resolve) => { resolveResult = resolve })
     this.writes = this.writes.then(async () => {
@@ -234,6 +256,7 @@ export class QueuePersistence {
     return result
   }
 
+  /** 读取最近一次成功持久化的队列修订号。 */
   public currentRevision(): number {
     return this.revision
   }

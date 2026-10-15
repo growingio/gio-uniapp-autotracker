@@ -31,6 +31,7 @@
 
 <script>
 export default {
+  /** 创建演示入口列表及首页状态提示。 */
   data() {
     return {
       note: '建议同时打开控制台和 mock collector 观察事件。',
@@ -45,14 +46,17 @@ export default {
     }
   },
   methods: {
+    /** 按页面类型选择 tab 切换或普通导航。 */
     go(item) {
       const url = `/pages/${item.path}/${item.path}`
       if (['custom-event', 'user', 'autotrack'].includes(item.path)) uni.switchTab({ url })
       else uni.navigateTo({ url })
     },
+    /** 携带 query 打开路由对照页。 */
     goRoute() {
       uni.navigateTo({ url: `/pages/route/route?from=index&tick=${Date.now()}&source=quick` })
     },
+    /** 发送首页快速事件并展示是否已被 SDK 接纳。 */
     trackQuick() {
       const queued = gdp('track', 'home_quick_track', { from: 'index', tick: Date.now() })
       this.note = queued ? '已入队 home_quick_track。' : '未入队：请先在采集开关页开启 dataCollect，并等待 SDK 就绪。'

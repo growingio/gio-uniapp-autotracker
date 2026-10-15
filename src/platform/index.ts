@@ -16,6 +16,7 @@ export type AppRuntimeOptions = Readonly<{
   sessionIdFactory: SessionIdFactory
 }>
 
+/** 读取窗口方向并复用最近有效方向，宿主失败时由方向解析器安全兜底。 */
 function orientationReader(host: AppSystemApi): () => PageOrientation {
   const resolver = new OrientationResolver()
   return () => {
@@ -33,39 +34,56 @@ function orientationReader(host: AppSystemApi): () => PageOrientation {
   }
 }
 
-/** Creates the App profile from the real `uni` surface without letting `uni` cross into core/runtime. */
+/** 从真实 uni 宿主装配 App 运行时，核心通过端口使用能力，不接收 uni 对象。 */
 export function createAppTracker(host: AppRuntimeHost, options: AppRuntimeOptions): TrackerRuntime {
   const storage = new AppStoragePort(host)
   const network = new AppNetworkPort(host)
   const tracker = new TrackerRuntime({
     storage,
+    /** 按当前配置创建系统读取端口，版本回退由初始化参数提供。 */
     systemContext: (config: ResolvedGioConfig) => ({
+      /** 读取基础系统信息并后台刷新网络，避免慢网络回调阻塞首批事件。 */
       load: async () => {
         const context = await new AppSystemContextPort(host, options.sdkVersion, config.appVersionFallback).load()
-        // Network metadata is refreshed in the background; it must not hold up App events.
+        // 网络元数据在后台刷新，不能因宿主慢回调阻塞 App 首批事件。
         void network.current()
         return { ...context, networkState: network.cached() }
       },
     }),
-    clock: { now: () => Date.now() },
-    timezone: { getOffsetMinutes: () => new Date().getTimezoneOffset() },
+    clock: {
+      /** 提供毫秒级当前时间，供事件时间与上传调度使用。 */
+      now: () => Date.now()
+    },
+    timezone: {
+      /** 读取当前本地时区相对 UTC 的偏移分钟数。 */
+      getOffsetMinutes: () => new Date().getTimezoneOffset()
+    },
     deviceIdFactory: options.deviceIdFactory,
     sessionIdFactory: options.sessionIdFactory,
     orientation: orientationReader(host),
     logger: {
+      /** 向宿主控制台输出普通初始化信息。 */
       info: (message) => globalThis.console?.info(message),
+      /** 向宿主控制台输出初始化完成信息。 */
       success: (message) => globalThis.console?.info(message),
+      /** 向宿主控制台输出固定警告。 */
       warn: (message) => globalThis.console?.warn(message),
+      /** 向宿主控制台输出运行失败诊断。 */
       error: (message) => globalThis.console?.error(message),
+      /** 按是否携带数据选择控制台参数，保留已裁剪的调试信息。 */
       debug: (message, data) => data === undefined ? globalThis.console?.log(message) : globalThis.console?.log(message, data),
     },
     network,
     upload: {
       transport: new AppRequestPort(host),
       runtime: {
+        /** 提供毫秒级当前时间，供事件时间与上传调度使用。 */
         now: () => Date.now(),
+        /** 提供退避抖动所需的随机值。 */
         random: () => Math.random(),
+        /** 使用宿主定时器安排上传超时或重试。 */
         setTimeout: (callback, delayMs) => globalThis.setTimeout(callback, delayMs),
+        /** 取消 SDK 已持有的上传或重试定时器。 */
         clearTimeout: (handle) => globalThis.clearTimeout(handle as ReturnType<typeof globalThis.setTimeout>),
       },
     },

@@ -22,14 +22,17 @@ export type AppLifecycleDependencies = Readonly<{
   sessions: SessionManager
   composer: EventComposer
   clock: ClockPort
-  /** `dataCollect` belongs to TrackerLifecycle; this bridge only asks whether a behavior event is allowed now. */
+  /** dataCollect 由 TrackerLifecycle 管理，此处只判断当前是否允许生成行为事件。 */
   canCollect: () => boolean
-  /** APP_CLOSED reuses the current page path/query when that context still exists. */
+  /** 当前页面上下文存在时，APP_CLOSED 复用其路由和 query。 */
   currentPage?: () => PageSnapshot | null
+  /** 尽力保存会话，失败不得阻断宿主前后台切换。 */
   persistSession?: (snapshot: SessionSnapshot | null) => void
+  /** 后台时触发有时限的尽力刷新，未完成事件仍留队。 */
   forceFlush?: () => void
 }>
 
+/** 仅保留有效入口路由与 query，不保存原始宿主参数。 */
 function normalizeEntry(entry: AppEntrySnapshot): AppEntrySnapshot {
   return {
     path: typeof entry.path === 'string' && entry.path.length > 0 ? entry.path : null,
@@ -37,23 +40,22 @@ function normalizeEntry(entry: AppEntrySnapshot): AppEntrySnapshot {
   }
 }
 
-/**
- * Pure App.vue lifecycle router. It never reads `uni`, Page, or Vue objects, so platform glue can
- * turn host arguments into a small snapshot before entering the SDK.
- */
+/** App 生命周期的纯数据路由，不直接读取 uni、Page 或 Vue 对象；宿主参数先由桥接层裁剪为快照。 */
 export class AppLifecycle {
   private launchEntry: AppEntrySnapshot | null = null
   private currentEntry: AppEntrySnapshot | null = null
   private coldStartPending = false
 
+  /** 注入会话、事件组装和存储回调；构造时不触发生命周期。 */
   public constructor(private readonly dependencies: AppLifecycleDependencies) {}
 
-  /** Marks a new App JS runtime; its following onShow owns the fresh-session VISIT. */
+  /** 标记新的 App JS 运行期，由后续 onShow 为新会话生成 VISIT。 */
   public onLaunch(entry: AppEntrySnapshot): void {
     this.launchEntry = normalizeEntry(entry)
     this.coldStartPending = true
   }
 
+  /** 恢复前台状态并判断是否新建会话；仅在新访问且允许采集时生成 VISIT。 */
   public onShow(entry: AppEntrySnapshot, observedAt?: number): AppShowResult {
     const timestamp = observedAt ?? this.dependencies.clock.now()
     this.dependencies.composer.setAppState('FOREGROUND')
@@ -69,7 +71,7 @@ export class AppLifecycle {
     return { session, visitQueued }
   }
 
-  /** Invoked only after `dataCollect` changes from false to true. */
+  /** 仅在 dataCollect 从 false 切换为 true 后调用。 */
   public onCollectionResumed(): AppShowResult {
     const session = this.dependencies.sessions.onCollectionResumed()
     this.persistSession(session.snapshot)
@@ -79,14 +81,14 @@ export class AppLifecycle {
     return { session, visitQueued }
   }
 
-  /** The identity router has already replaced the session; this only emits its required VISIT. */
+  /** 身份路由已替换会话，此处仅在允许采集时补充对应 VISIT。 */
   public onUserChanged(): boolean {
     return this.dependencies.canCollect()
       ? this.dependencies.composer.compose({ eventType: 'VISIT', fields: this.currentEntry ?? {} }).ok
       : false
   }
 
-  /** Best effort only: persistence and flush failures cannot block the host entering background. */
+  /** 关闭事件仅尽力发送；持久化和刷新失败不能阻止宿主进入后台。 */
   public onHide(observedAt?: number): AppHideResult {
     const timestamp = observedAt ?? this.dependencies.clock.now()
     this.dependencies.composer.setAppState('BACKGROUND')
@@ -103,20 +105,22 @@ export class AppLifecycle {
     try {
       this.dependencies.forceFlush?.()
     } catch {
-      // A host-specific flush is deliberately non-blocking during App.onHide.
+      // App.onHide 中的宿主刷新仅尽力执行，不阻塞退后台。
     }
     return { session, appClosedQueued }
   }
 
+  /** 读取启动入口与最近一次 App 显示入口。 */
   public entry(): Readonly<{ launch: AppEntrySnapshot | null; current: AppEntrySnapshot | null }> {
     return { launch: this.launchEntry, current: this.currentEntry }
   }
 
+  /** 尽力保存会话快照，隔离持久化异常以免影响宿主生命周期。 */
   private persistSession(snapshot: SessionSnapshot | null): void {
     try {
       this.dependencies.persistSession?.(snapshot)
     } catch {
-      // Persistence is retried by the adapter on its next opportunity.
+      // 本次持久化失败不阻塞生命周期，后续状态变化仍可再次保存。
     }
   }
 }

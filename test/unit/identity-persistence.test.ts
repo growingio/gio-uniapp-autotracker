@@ -4,6 +4,7 @@ import { IdentityPersistence } from '../../src/core/storage/index.js'
 import { serializeIdentityRecord } from '../../src/core/userStore.js'
 import type { StoragePort } from '../../src/types/index.js'
 
+/** 构造身份存储读取结果并记录本键写入和删除，验证故障隔离。 */
 function port(read: Awaited<ReturnType<StoragePort['read']>>): { port: StoragePort; writes: string[]; removals: string[] } {
   const writes: string[] = []
   const removals: string[] = []

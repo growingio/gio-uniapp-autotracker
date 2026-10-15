@@ -17,7 +17,7 @@ export type PageLoadInput = Readonly<{
   referralPage: string | null
 }>
 
-/** Stores only normalized lifecycle data; Vue/Page instances never enter the core. */
+/** 只保存已归一化的生命周期数据，不保留 Vue 或 Page 实例。 */
 export class PageStore {
   private readonly pages = new Map<string, PageSnapshot>()
   private currentInstanceId: string | null = null
@@ -44,7 +44,7 @@ export class PageStore {
     return snapshot
   }
 
-  /** A true onShow selects the current page and may refresh its safely-read title. */
+  /** 真实 onShow 选择当前页面，并更新安全读取到的标题与显示时间。 */
   public onShow(instanceId: string, shownAt: number, title: string | null): PageSnapshot | null {
     if (!Number.isFinite(shownAt) || shownAt < 0 || typeof title !== 'string' && title !== null) return null
     const page = this.pages.get(instanceId)
@@ -59,28 +59,31 @@ export class PageStore {
     return snapshot
   }
 
+  /** 更新已加载页面的标题，不改变页面来源或显示时间。 */
   public setTitle(instanceId: string, title: string): void {
     const page = this.pages.get(instanceId)
     if (page !== undefined) this.pages.set(instanceId, { ...page, title })
   }
 
-  /** Page hide never means App background; it only removes this instance as the current context. */
+  /** 页面隐藏只解除该实例的当前页关联，不推断 App 进入后台。 */
   public onHide(instanceId: string): void {
     if (this.currentInstanceId === instanceId) this.currentInstanceId = null
   }
 
+  /** 移除页面快照及自动来源标记，并清理指向该实例的当前页引用。 */
   public onUnload(instanceId: string): void {
     this.pages.delete(instanceId)
     this.automaticReferrals.delete(instanceId)
     if (this.currentInstanceId === instanceId) this.currentInstanceId = null
   }
 
+  /** 读取当前可见页面；隐藏后或实例不存在时返回 null。 */
   public current(): PageSnapshot | null {
     if (this.currentInstanceId === null) return null
     return this.pages.get(this.currentInstanceId) ?? null
   }
 
-  /** A consent replay starts a new PAGE time without simulating navigation or changing its referral. */
+  /** 恢复采集时刷新 PAGE 显示时间，不模拟导航或修改来源页面。 */
   public refreshCurrentShownAt(shownAt: number): PageSnapshot | null {
     const page = this.current()
     if (page === null || this.currentInstanceId === null || !Number.isFinite(shownAt) || shownAt < 0) return null
@@ -89,6 +92,7 @@ export class PageStore {
     return refreshed
   }
 
+  /** 校验页面实例、路由、query 和可选来源的基础类型。 */
   private validLoadInput(input: PageLoadInput): boolean {
     return typeof input.instanceId === 'string' && input.instanceId.length > 0
       && typeof input.route === 'string' && input.route.length > 0
@@ -105,6 +109,7 @@ export type OrientationInput = Readonly<{
   windowHeight?: unknown
 }>
 
+/** 将宿主方向字符串转换为协议枚举，其他值返回 null。 */
 function normalizedOrientation(value: unknown): PageOrientation | null {
   if (typeof value !== 'string') return null
   const source = value.trim().toLowerCase()
@@ -113,16 +118,18 @@ function normalizedOrientation(value: unknown): PageOrientation | null {
   return null
 }
 
+/** 通过有效且不相等的窗口宽高推断方向，无法确定时返回 null。 */
 function inferredOrientation(width: unknown, height: unknown): PageOrientation | null {
   if (typeof width !== 'number' || typeof height !== 'number'
     || !Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0 || width === height) return null
   return width > height ? 'LANDSCAPE' : 'PORTRAIT'
 }
 
-/** Resolves one PAGE orientation from host snapshots without keeping a host object in runtime state. */
+/** 从宿主快照解析 PAGE 方向，状态中不保留原始宿主对象。 */
 export class OrientationResolver {
   private lastObserved: PageOrientation | null = null
 
+  /** 优先采用显式方向或窗口推断，其次保留最近有效值，最终回退竖屏。 */
   public resolve(input: OrientationInput): PageOrientation {
     const observed = normalizedOrientation(input.deviceOrientation) ?? inferredOrientation(input.windowWidth, input.windowHeight)
     if (observed !== null) {
@@ -142,38 +149,46 @@ export type PageLifecycleDependencies = Readonly<{
   pages: PageStore
   composer: EventComposer
   clock: ClockPort
+  /** 读取当前页面使用的规范方向值。 */
   orientation: () => PageOrientation
+  /** 判断当前意图与采集同意状态是否允许生成 PAGE。 */
   canCollect: () => boolean
 }>
 
-/** Turns pre-normalized Page lifecycle snapshots into PAGE events; it never owns an App lifecycle. */
+/** 将已归一化的页面生命周期快照转换为 PAGE，不承担 App 生命周期职责。 */
 export class PageLifecycle {
+  /** 注入页面状态、事件组装及采集门控，保持页面逻辑与宿主对象隔离。 */
   public constructor(private readonly dependencies: PageLifecycleDependencies) {}
 
+  /** 登记页面实例的不可变路由和初始 query 快照。 */
   public onLoad(input: PageLoadInput): PageSnapshot | null {
     return this.dependencies.pages.onLoad(input)
   }
 
+  /** 以同一时间戳更新当前页并生成 PAGE，保证后续行为关联一致。 */
   public onShow(instanceId: string, title: string | null): PageShowResult {
     const page = this.dependencies.pages.onShow(instanceId, this.dependencies.clock.now(), title)
     return { page, pageQueued: page !== null && this.emitPage(page) }
   }
 
+  /** 清除该实例的当前页面关联，不将切页误作 App 退后台。 */
   public onHide(instanceId: string): void {
     this.dependencies.pages.onHide(instanceId)
   }
 
+  /** 释放卸载页面的快照与当前页引用。 */
   public onUnload(instanceId: string): void {
     this.dependencies.pages.onUnload(instanceId)
   }
 
-  /** Used after dataCollect false → true, after the lifecycle router has emitted its replacement VISIT. */
+  /** 恢复采集时，在 App 生命周期已生成新 VISIT 后补发当前 PAGE。 */
   public replayCurrentPage(): boolean {
     if (!this.dependencies.canCollect() || this.dependencies.pages.current() === null) return false
     const page = this.dependencies.pages.refreshCurrentShownAt(this.dependencies.clock.now())
     return page !== null && this.emitPage(page)
   }
 
+  /** 在允许采集且页面已显示时，携带来源、标题和方向生成 PAGE。 */
   private emitPage(page: PageSnapshot): boolean {
     if (!this.dependencies.canCollect() || page.shownAt === null) return false
     return this.dependencies.composer.compose({

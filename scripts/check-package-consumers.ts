@@ -87,7 +87,10 @@ console.log('consumer_passed:${channel}');
       assert.ok(loaded, 'Vite 配置未加载')
       const plugin = loaded.config.plugins?.[0] as UniAppAutoTrackVitePlugin
       assert.equal(plugin.name, 'gio-uniapp-autotrack')
-      const transformed = plugin.transform.call({ warn: warning => { throw new Error(warning) } }, '<script setup>const save = e => e</script><template><button @click="save($event)" /></template>', 'page.vue')
+      const transformed = plugin.transform.call({
+        /** 将独立消费者的插桩告警升级为失败，避免检查静默漏过。 */
+        warn: warning => { throw new Error(warning) }
+      }, '<script setup>const save = e => e</script><template><button @click="save($event)" /></template>', 'page.vue')
       assert.ok(transformed?.code.includes(runtimeImport), `${channel}/${mode} 探针入口错误`)
       console.log(`vite_config_passed:${channel}:${mode}`)
     }

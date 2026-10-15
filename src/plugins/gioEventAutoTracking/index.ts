@@ -5,16 +5,21 @@ const tabFields = new Set(['schemaVersion', 'source', 'kind', 'xpath', 'index', 
 export const MAX_RANGE_ITEMS = 1000
 export const MAX_PICKER_COLUMNS = 20
 
+/** 为探针和宿主事件提供非数组对象视图，不序列化原始对象。 */
 export function record(value: unknown): Readonly<Record<string, unknown>> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Readonly<Record<string, unknown>> : null
 }
+/** 只认可字符串、布尔和有限数字作为可采集基础值。 */
 function scalar(value: unknown): value is string | number | boolean {
   return typeof value === 'string' || typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value))
 }
+/** 允许字段缺省或显式为空，其余值必须是可采集标量。 */
 function optionalScalar(value: unknown): boolean { return value == null || scalar(value) }
+/** 清理基础值中的控制字符和首尾空白，完整链接不套用显示文案上限。 */
 function scalarText(value: unknown): string | null {
   return scalar(value) ? String(value).replace(/[\u0000-\u001F\u007F]/g, ' ').trim() : null
 }
+/** 将显示文案限制为最多 100 个 Unicode 码点，避免拆开表情字符的代理对。 */
 function text(value: unknown): string | null {
   const source = scalarText(value)
   if (source === null) return null
@@ -26,33 +31,41 @@ function text(value: unknown): string | null {
   }
   return result
 }
+/** 统一识别空标记、true、1 及其约定字符串形式。 */
 export function enabledMarker(value: unknown): boolean { return value === true || value === '' || value === 'true' || value === 1 || value === '1' }
+/** 只读取对象自身的数据属性，避免执行 dataset 或 range 上的属性访问器。 */
 function ownValue(value: Readonly<Record<string, unknown>>, key: string): unknown {
   const field = Object.getOwnPropertyDescriptor(value, key)
   return field !== undefined && 'value' in field ? field.value : undefined
 }
+/** 兼容 dataset 的驼峰与连字符键，并只读取自有值。 */
 function data(dataset: Readonly<Record<string, unknown>> | null, name: string): unknown {
   if (dataset === null) return undefined
   const camel = name.replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase())
   return Object.prototype.hasOwnProperty.call(dataset, camel) ? ownValue(dataset, camel) : ownValue(dataset, name)
 }
+/** 优先使用触发时的 dataset；只有字段确实缺失时才采用受限静态补充。 */
 function metadata(dataset: Readonly<Record<string, unknown>> | null, name: string, fallback: unknown): unknown {
   const value = data(dataset, name)
   return value === undefined ? fallback : value
 }
+/** 判断 dataset 上的隐私或采集标记是否明确启用。 */
 function marked(dataset: Readonly<Record<string, unknown>> | null, name: string): boolean { return enabledMarker(data(dataset, name)) }
+/** 解析规范十进制整数下标，拒绝负数、小数、前导零和协议上限外的值。 */
 function index(value: unknown, minimum: number): number | null {
   if (typeof value !== 'string' && typeof value !== 'number') return null
   if (!/^(0|[1-9]\d*)$/.test(String(value))) return null
   const result = Number(value)
   return Number.isSafeInteger(result) && result >= minimum && result < 2147483647 ? result : null
 }
+/** 检查目标自身或宿主 attr 中的密码、文件输入类型。 */
 function sensitiveTarget(target: Readonly<Record<string, unknown>> | null): boolean {
   const kind = target?.type ?? record(target?.attr)?.type
   return typeof kind === 'string' && ['password', 'safe-password', 'file'].includes(kind.toLowerCase())
 }
 
-// 只接受有界、无 getter 的 JSON range；不序列化整个组件、响应式对象或宿主事件。
+// 只接受有界、无属性访问器的 JSON range；不序列化整个组件、响应式对象或宿主事件。
+/** 复制有数量上限且没有空洞或属性访问器的数组元素，拒绝不可安全读取的范围。 */
 function arrayValues(value: unknown, maximum: number): readonly unknown[] | null {
   if (!Array.isArray(value) || value.length > maximum) return null
   const result: unknown[] = []
@@ -63,8 +76,10 @@ function arrayValues(value: unknown, maximum: number): readonly unknown[] | null
   }
   return result
 }
+/** 验证 picker 范围为有界的纯数据，避免把响应式对象或宿主组件传入报文链路。 */
 function validRange(value: unknown, columns: boolean): boolean {
   let count = 0
+  /** 逐项累计范围预算，只允许基础值或有限属性的纯记录。 */
   const item = (entry: unknown): boolean => {
     count += 1
     if (count > MAX_RANGE_ITEMS) return false
@@ -74,6 +89,7 @@ function validRange(value: unknown, columns: boolean): boolean {
     const descriptors = Object.values(Object.getOwnPropertyDescriptors(object))
     return descriptors.length <= 32 && descriptors.every((field) => 'value' in field && (field.value === null || scalar(field.value)))
   }
+  /** 校验一个选项数组及其全部元素，共享总范围预算。 */
   const list = (entries: unknown): boolean => {
     const values = arrayValues(entries, MAX_RANGE_ITEMS)
     return values !== null && values.every(item)
@@ -82,6 +98,7 @@ function validRange(value: unknown, columns: boolean): boolean {
   const values = arrayValues(value, MAX_PICKER_COLUMNS)
   return values !== null && values.every(list)
 }
+/** 按下标和可选键安全读取选项文案，不触发对象属性访问器。 */
 function pickerLabel(range: unknown, at: number, key: unknown): string | null {
   if (!Array.isArray(range)) return null
   const value = Object.getOwnPropertyDescriptor(range, String(at))
@@ -89,14 +106,17 @@ function pickerLabel(range: unknown, at: number, key: unknown): string | null {
   const object = record(value.value)
   return text(typeof key === 'string' && object !== null ? ownValue(object, key) : value.value)
 }
+/** 校验并以约定分隔符拼接多选值，再应用文案长度限制。 */
 function scalarArray(value: unknown): string | null {
   const values = arrayValues(value, MAX_RANGE_ITEMS)
   return values !== null && values.every(scalar) ? text(values.map(String).join('||')) : null
 }
+/** 优先将合法 picker 下标映射为文案，缺少可靠范围时保留下标。 */
 function pickerValue(value: unknown, range: unknown, key: unknown): string | null {
   const at = index(value, 0)
   return at === null ? null : pickerLabel(range, at, key) ?? String(at)
 }
+/** 仅在列数与全部选项可确认时拼接文案，否则统一使用规范下标。 */
 function pickerViewValue(value: unknown, range: unknown, key: unknown): string | null {
   const values = arrayValues(value, MAX_PICKER_COLUMNS)
   if (values === null) return null
@@ -107,9 +127,11 @@ function pickerViewValue(value: unknown, range: unknown, key: unknown): string |
   return text(columns !== null && columns.length === indices.length && labels.every((label) => label !== null)
     ? labels.join('||') : indices.join('||'))
 }
+/** 按受支持的宿主字段顺序读取已获授权的输入完成值，保留零与 false。 */
 function inputValue(detail: Readonly<Record<string, unknown>> | null, target: Readonly<Record<string, unknown>> | null): string | null {
   return text(detail?.value ?? target?.value ?? record(target?.attr)?.value)
 }
+/** 按组件种类解释已获授权的完成值，拒绝不匹配的宿主数据形态。 */
 function changeValue(element: unknown, detail: Readonly<Record<string, unknown>> | null, target: Readonly<Record<string, unknown>> | null, range: unknown, key: unknown): string | null {
   switch (element) {
     case 'input': case 'textarea': return inputValue(detail, target)
@@ -146,7 +168,7 @@ export function normalizeAutoTrackCall(value: unknown, nativeEvent?: unknown): N
     const currentData = record(current?.dataset)
     const targetData = record(target?.dataset)
     const dataset = current === null ? targetData : currentData
-    // 必须先短路，连 detail.value、range、textValue 的 getter 都不能触碰。
+    // 必须先短路，连 detail.value、range、textValue 的属性访问器都不能触碰。
     if (enabledMarker(probe.ignored) || enabledMarker(probe.sensitive)
       || marked(currentData, 'growing-ignore') || marked(targetData, 'growing-ignore')
       || marked(currentData, 'growing-sensitive') || marked(targetData, 'growing-sensitive')
@@ -177,11 +199,12 @@ export function normalizeAutoTrackCall(value: unknown, nativeEvent?: unknown): N
 }
 
 export interface AutoTrackTarget {
+  /** 接收编译探针与原始事件；运行时负责门控、隐私和协议裁剪。 */
   autoTrack(call: AutoTrackCall, nativeEvent?: unknown): boolean
 }
 let target: AutoTrackTarget | null = null
 
-/** 每个 tracker 各自持有去重状态；原始事件和目标仅作为 WeakMap 弱键，不进入队列或日志。 */
+/** 每个跟踪实例各自持有去重状态；原始事件和目标仅作为 WeakMap 弱键，不进入队列或日志。 */
 export class AutoTrackDispatcher {
   private seen = new WeakMap<object, Set<string>>()
   private targets = new WeakMap<object, number>()
@@ -189,6 +212,7 @@ export class AutoTrackDispatcher {
   private previous: Readonly<{ key: string; timeStamp: number }> | null = null
   private pageKey: string | null = null
 
+  /** 清空事件弱键、无 id 目标身份及时间窗，建立新的页面去重边界。 */
   public reset(): void {
     this.seen = new WeakMap()
     this.targets = new WeakMap()
@@ -197,6 +221,7 @@ export class AutoTrackDispatcher {
     this.pageKey = null
   }
 
+  /** 隐私归一化后进行对象与窄时间窗去重，只有下游接纳成功才登记已见状态。 */
   public dispatch(call: AutoTrackCall, nativeEvent: unknown, pageKey: string | null, emit: (call: NormalizedAutoTrackCall) => boolean): boolean {
     try {
       if (this.pageKey !== pageKey) { this.reset(); this.pageKey = pageKey }
@@ -204,8 +229,8 @@ export class AutoTrackDispatcher {
       const normalized = normalizeAutoTrackCall(call, nativeEvent)
       if (normalized === null) return false
       const event = record(nativeEvent)
-      // Equal wire xpaths do not identify equal elements when the bound id is empty.
-      // Keep only a weak target identity; it never becomes a protocol field.
+      // 绑定 id 为空时，相同出站 xpath 不能证明是同一元素。
+      // 内部只保存弱引用目标身份，不将其作为协议字段上报。
       const primary = record(event?.currentTarget) ?? record(event?.target)
       const rawId = primary?.id
       const hasId = (typeof rawId === 'string' || typeof rawId === 'number') && String(rawId) !== ''
@@ -236,7 +261,9 @@ export class AutoTrackDispatcher {
   }
 }
 
+/** 安装当前单例运行时作为编译探针的接收端。 */
 export function installAutoTrackDispatcher(next: AutoTrackTarget): void { target = next }
+/** 将编译探针交给已安装运行时，缺失接收端或发生异常时返回 false。 */
 export function dispatchAutoTrack(call: AutoTrackCall, nativeEvent?: unknown): boolean {
   try { return target?.autoTrack(call, nativeEvent) ?? false } catch { return false }
 }

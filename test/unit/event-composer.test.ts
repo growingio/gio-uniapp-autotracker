@@ -9,6 +9,7 @@ import type { AppSystemContext } from '../../src/types/index.js'
 import { EventQueue, MAX_QUEUE_ITEMS, MAX_EVENT_BYTES } from '../../src/core/queue.js'
 import { SessionManager } from '../../src/core/userStore.js'
 
+/** 提供事件组装所需的合法归一化配置。 */
 function fixtureConfig() {
   const normalized = normalizeInitOptions({ accountId: 'account', dataSourceId: 'source', appChannel: 'release' })
   if (normalized.ok === false) throw new Error('fixture_config_invalid')
@@ -23,6 +24,7 @@ const system: AppSystemContext = {
   deviceType: 'PHONE', appVersion: '1.0.0', language: 'zh-CN', sdkVersion: '0.1.0',
 }
 
+/** 注入可覆盖的时间、身份与系统依赖，供事件拒绝和入队边界验证。 */
 function createComposer(overrides: Partial<{ clock: () => number; identity: () => Identity; timezone: () => number; network: () => AppSystemContext['networkState'] }> = {}) {
   const sessions = new SessionManager(config.sessionPolicy, () => 'session-1')
   sessions.resume(1)

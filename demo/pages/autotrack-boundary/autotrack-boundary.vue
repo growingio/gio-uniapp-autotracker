@@ -33,17 +33,30 @@ import AutoTrackBoundaryEmit from '@/components/auto-track-boundary-emit/auto-tr
 
 export default {
   components: { AutoTrackBoundaryEmit },
+  /** 初始化边界演示状态，不保存实际输入内容。 */
   data() { return { count: 0, lastAction: '尚未操作。', nativeEventName: 'tap', handlerKey: 'save' } },
-  computed: { handlers() { return { save: this.onComputed } } },
+  computed: {
+    /** 提供计算成员访问的业务函数，验证不安全表达式保持原样。 */
+    handlers() { return { save: this.onComputed } }
+  },
   methods: {
+    /** 更新页面业务计数和最近动作，用于确认监听器确实执行。 */
     mark(name) { this.count++; this.lastAction = name },
+    /** 记录函数引用监听的业务执行结果，采集侧保持既有边界。 */
     onReference() { this.mark('函数引用业务已执行') },
+    /** 记录计算成员监听的业务执行结果。 */
     onComputed() { this.mark('计算成员业务已执行') },
+    /** 记录带停止冒泡修饰符的子层业务调用。 */
     onStopped() { this.mark('.stop 子按钮业务已执行') },
+    /** 记录父层业务调用，用于核对停止冒泡是否仍生效。 */
     onParent() { this.mark('父层业务已执行；点击子按钮不应走到这里') },
+    /** 记录动态事件名监听的业务执行结果。 */
     onDynamic() { this.mark('动态事件业务已执行') },
+    /** 记录自定义组件 emit 到达父层的业务结果。 */
     onCustomClick() { this.mark('自定义组件 emit 业务已执行') },
+    /** 只记录输入交互发生，不读取或展示输入原文。 */
     onTyping() { this.mark('input 业务已执行，不记录输入原文') },
+    /** 返回上一页面，结束边界演示。 */
     back() { uni.navigateBack() },
   },
 }

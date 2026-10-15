@@ -32,6 +32,7 @@ const DEFAULT_LIMITS: QueueLimits = {
   maxBatchBytes: MAX_BATCH_BYTES,
 }
 
+/** 计算序列化事件的 UTF-8 占用，供单事件、批次和持久化限额判断。 */
 function utf8ByteLength(value: string): number {
   let size = 0
   for (let index = 0; index < value.length; index += 1) {
@@ -49,6 +50,7 @@ function utf8ByteLength(value: string): number {
   return size
 }
 
+/** 安全序列化协议事件，无法生成 JSON 字符串时返回 null。 */
 function serializedEvent(event: ProtocolEvent): string | null {
   try {
     const result = JSON.stringify(event)
@@ -58,6 +60,7 @@ function serializedEvent(event: ProtocolEvent): string | null {
   }
 }
 
+/** 从 JSON 文本创建独立事件副本，拒绝非对象形态。 */
 function cloneEvent(serialized: string): ProtocolEvent | null {
   try {
     const value: unknown = JSON.parse(serialized)
@@ -68,17 +71,16 @@ function cloneEvent(serialized: string): ProtocolEvent | null {
   }
 }
 
-/**
- * Queue state is host-independent. Snapshot encoding and ordered host writes belong
- * to the storage module.
- */
+/** 队列状态与宿主无关，快照编码及有序宿主写入由存储模块负责。 */
 export class EventQueue {
   private readonly entries: QueueEntry[] = []
   private readonly claimed = new Set<string>()
   private nextRequestNumber = 1
 
+  /** 注入队列条数、事件字节和上传批次等内部限制。 */
   public constructor(private readonly limits: QueueLimits = DEFAULT_LIMITS) {}
 
+  /** 依次校验事件和队列容量，成功后以独立 JSON 副本入队并分配请求标识。 */
   public enqueue(event: ProtocolEvent): EnqueueResult {
     const serialized = serializedEvent(event)
     if (serialized === null) return { ok: false, code: 'event_not_serializable' }
@@ -99,22 +101,24 @@ export class EventQueue {
     return { ok: true, requestId }
   }
 
-  /** Selects the oldest legal JSON-array batch without removing it from the queue. */
+  /** 选取最早的合法 JSON 数组批次，不从队列删除记录。 */
   public nextBatch(): readonly QueueEntry[] {
     return this.selectBatch(false)
   }
 
-  /** Claims entries so a concurrent uploader slot cannot send the same event twice. */
+  /** 领取批次并登记占用，避免多个并发上传槽位重复发送同一事件。 */
   public claimNextBatch(): readonly QueueEntry[] {
     const batch = this.selectBatch(true)
     for (const entry of batch) this.claimed.add(entry.requestId)
     return batch
   }
 
+  /** 释放指定请求的上传占用，允许后续调度重新选择。 */
   public release(requestIds: readonly string[]): void {
     for (const requestId of requestIds) this.claimed.delete(requestId)
   }
 
+  /** 在数量与字节限制内选取最早批次；并发上传时跳过已占用记录并隔离重试预算。 */
   private selectBatch(excludeClaimed: boolean): readonly QueueEntry[] {
     const batch: QueueEntry[] = []
     let body = '['
@@ -133,6 +137,7 @@ export class EventQueue {
     return batch
   }
 
+  /** 按请求标识移除事件，同时清理其上传占用。 */
   public remove(requestIds: readonly string[]): void {
     if (requestIds.length === 0) return
     const ids = new Set(requestIds)
@@ -144,6 +149,7 @@ export class EventQueue {
     }
   }
 
+  /** 只增加指定事件的已用重试次数，供持久化与后续批次分组。 */
   public incrementRetries(requestIds: readonly string[]): void {
     const ids = new Set(requestIds)
     for (let index = 0; index < this.entries.length; index += 1) {
@@ -152,7 +158,7 @@ export class EventQueue {
     }
   }
 
-  /** Restores only a fully valid persisted snapshot; callers keep the current queue on failure. */
+  /** 仅恢复完整有效的持久快照；校验失败时保留现有队列。 */
   public restore(entries: readonly QueueEntry[]): boolean {
     if (entries.length > this.limits.maxItems || entries.some((entry) => !this.validEntry(entry))) return false
     const normalized = entries.map((entry) => ({
@@ -172,6 +178,7 @@ export class EventQueue {
     return true
   }
 
+  /** 生成不与当前队列冲突的标识，到达安全整数上限后循环寻找空位。 */
   private allocateRequestId(): string {
     let requestId: string
     do {
@@ -181,10 +188,12 @@ export class EventQueue {
     return requestId
   }
 
+  /** 返回事件内容也已复制的队列快照，避免外部修改内部记录。 */
   public snapshot(): readonly QueueEntry[] {
     return this.entries.map((entry) => ({ ...entry, event: cloneEvent(JSON.stringify(entry.event)) ?? entry.event }))
   }
 
+  /** 校验缓存条目、请求标识、重试次数和完整协议，阻止损坏数据恢复。 */
   private validEntry(entry: unknown): entry is QueueEntry {
     if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return false
     const candidate = entry as Readonly<Record<string, unknown>>

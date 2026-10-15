@@ -5,7 +5,10 @@
 <script>
 export default {
   emits: ['click'],
-  methods: { emitClick(event) { this.$emit('click', event) } },
+  methods: {
+    /** 透传子组件点击，验证自定义组件事件的业务行为与采集边界。 */
+    emitClick(event) { this.$emit('click', event) }
+  },
 }
 </script>
 

@@ -1,5 +1,5 @@
 /**
- * 阶段 0 只定义跨层边界。具体 core 与 `uni.*` 适配器分别在阶段 1、2 实现。
+ * 阶段 0 只定义跨层边界。具体核心逻辑与 `uni.*` 适配器分别在阶段 1、2 实现。
  */
 export type AppPlatform = 'Android' | 'iOS' | 'HarmonyOS'
 
@@ -20,17 +20,17 @@ export type AppSystemContext = Readonly<{
   sdkVersion: string
 }>
 
-/** Loads only stable App context. Per-event timezone belongs to TimezonePort. */
+/** 仅加载稳定 App 上下文，每条事件的时区由 TimezonePort 提供。 */
 export interface SystemContextPort {
   load(): Promise<AppSystemContext>
 }
 
-/** Event timestamps are current device Unix milliseconds and are never monotonicized. */
+/** 事件时间使用当前设备的 Unix 毫秒时间戳，不强制修正为单调递增。 */
 export interface ClockPort {
   now(): number
 }
 
-/** Timezone changes affect only events created after the change. */
+/** 时区变化只影响变化后创建的事件。 */
 export interface TimezonePort {
   getOffsetMinutes(): number
 }

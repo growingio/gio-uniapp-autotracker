@@ -11,6 +11,7 @@ export default {
   },
   emits: ['click'],
   methods: {
+    /** 将链接交互原样通知父组件，供自动链接探针验证。 */
     openURL(event) { this.$emit('click', event) },
   },
 }

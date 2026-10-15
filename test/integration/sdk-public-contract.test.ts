@@ -11,6 +11,7 @@ beforeEach(() => {
 })
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals() })
 
+/** 创建指定平台的受控 SDK，供公开命令到协议报文的契约验证。 */
 async function sdk(platform = 'android') {
   const values = new Map<string, string>()
   const received: ProtocolEvent[] = []

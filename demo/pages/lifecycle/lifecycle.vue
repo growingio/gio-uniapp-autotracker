@@ -31,11 +31,16 @@
 
 <script>
 export default {
+  /** 初始化前后台、网络恢复和屏幕上下文验证状态。 */
   data() { return { result: '尚未操作。', networkRunId: '', networkRunCount: 0, networkResult: '尚未发送网络标记。', screenResult: '尚未读取屏幕信息。' } },
   methods: {
+    /** 发送当前页面的生命周期对照业务事件。 */
     trackAction() { this.result = gdp('track', 'lifecycle_demo_action', { page: 'lifecycle' }) ? '事件已入队。' : '未入队：先开启采集开关。' },
+    /** 携带时间标记导航，供 PAGE 来源与 query 核对。 */
     goRoute() { uni.navigateTo({ url: `/pages/route/route?from=lifecycle&tick=${Date.now()}` }) },
+    /** 验证成功初始化后不再接受插件注册。 */
     registerAfterInit() { this.result = gdp('registerPlugins', [{ name: 'gioEventAutoTracking' }]) ? '异常：初始化后仍允许注册插件。' : '已正确拒绝：插件只能在首次 init 前注册。' },
+    /** 记录离线阶段的关联标记，不将入队结果当作联网或上传成功。 */
     offlineScenario() {
       if (this.networkRunId) { this.networkResult = '已有离线标记，请恢复网络并完成第 2 步后再开始。'; return false }
       const runId = `network-${Date.now()}-${++this.networkRunCount}`
@@ -44,6 +49,7 @@ export default {
       this.networkResult = `${runId}：离线标记已入队。请到系统设置恢复网络，再回到 App 发送恢复标记。`
       return true
     },
+    /** 发送同组恢复标记，供在请求与采集服务中核对离线补发。 */
     recoveredScenario() {
       if (!this.networkRunId) { this.networkResult = '请先发送离线标记。'; return false }
       const runId = this.networkRunId
@@ -52,11 +58,15 @@ export default {
       this.networkResult = `${runId}：恢复标记已入队。请在 Debug JSON / 请求中对照两条标记，并在 collector 确认接收成功；当前界面未确认网络或发送结果。`
       return true
     },
+    /** 独立读取逻辑尺寸和 DPR，计算预期物理像素并发送对照事件。 */
     screenScenario() {
+      /** 安全读取宿主记录，缺失或异常时返回空对象。 */
       const read = (get) => { try { const value = get(); return value && typeof value === 'object' && !Array.isArray(value) ? value : {} } catch { return {} } }
       const device = read(() => uni.getDeviceInfo())
       const system = read(() => uni.getSystemInfoSync())
+      /** 只接受有效正整数尺寸，避免展示错误的物理像素期望。 */
       const dimension = (value) => Number.isInteger(value) && value > 0 ? value : null
+      /** 只接受有限正数像素比。 */
       const ratioValue = (value) => Number.isFinite(value) && value > 0 ? value : null
       const width = dimension(device.screenWidth) ?? dimension(system.screenWidth)
       const height = dimension(device.screenHeight) ?? dimension(system.screenHeight)

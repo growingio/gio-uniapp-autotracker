@@ -212,12 +212,14 @@ import AutoTrackScriptSetup from '@/components/auto-track-script-setup/auto-trac
 import AutoTrackSetupAlias from '@/components/auto-track-setup-alias/auto-track-setup-alias.vue'
 import UniLink from '@/components/uni-link/uni-link.vue'
 
+/** 创建互相独立的初始列表项，供重排、更新和恢复场景使用。 */
 function initialItems() {
   return [1, 2].map(index => ({ key: `sku-${index}`, id: `sku-${index}`, title: `商品${index === 1 ? '一' : '二'}`, src: `/pages/route/route?from=sku&item=${index}` }))
 }
 
 export default {
   components: { AutoTrackScriptSetup, AutoTrackSetupAlias, UniLink },
+  /** 初始化自动采集验收控件和页面反馈状态，各实例独立保存。 */
   data() {
     return {
       gioPageTitle: '无埋点实机验收',
@@ -237,19 +239,34 @@ export default {
       lastAction: '尚未操作。',
     }
   },
-  computed: { dynamicInputType() { return this.numericInput ? 'number' : 'text' } },
+  computed: {
+    /** 按页面开关选择输入类型，验证动态属性下的保守采集规则。 */
+    dynamicInputType() { return this.numericInput ? 'number' : 'text' }
+  },
   methods: {
+    /** 累计业务动作并刷新页面提示，作为业务监听器执行的可见证据。 */
     mark(message) { this.actionCount += 1; this.lastAction = `第 ${this.actionCount} 次：${message}` },
+    /** 记录普通点击业务动作。 */
     onAction(name) { this.mark(name) },
+    /** 记录有稳定 id 的动态列表项交互。 */
     onListAction(name) { this.mark(`动态列表：${name}`) },
+    /** 记录无 id 列表项交互，用于核对目标身份去重。 */
     onNoIdListAction(name) { this.mark(`无 id 列表：${name}`) },
+    /** 记录父目标无 id 的交互，验证不会借用子目标 id。 */
     onParentWithoutId() { this.mark('父节点无 id') },
+    /** 记录零下标业务调用，验证非法采集 index 不改变业务行为。 */
     onZeroIndex() { this.mark('data-index=0') },
+    /** 记录冒泡到父层的独立业务调用。 */
     onBubbleParent() { this.mark('冒泡父层业务') },
+    /** 记录子层点击，用于与父层冒泡事件对照。 */
     onBubbleChild() { this.mark('冒泡子层业务') },
+    /** 记录独立点击，核对去重没有合并真实重复操作。 */
     onRepeatAction() { this.mark('独立点击业务') },
+    /** 切到对照页面后返回，用于验证页面切换会清空去重边界。 */
     goDedupRoute() { uni.navigateTo({ url: '/pages/route/route?from=autotrack&case=page-return' }) },
+    /** 重排列表，验证触发时元数据跟随实际项目更新。 */
     reverseItems() { this.items.reverse(); this.mark('列表已重排') },
+    /** 修改首项的绑定元数据，验证采集读取当前渲染结果。 */
     updateFirstItem() {
       const first = this.items[0]
       if (!first) { this.mark('列表为空，请先新增或恢复'); return }
@@ -257,48 +274,91 @@ export default {
       first.id = `${first.key}-r${revision}`; first.title = `演示商品第 ${revision} 版`; first.src = `/pages/route/route?from=updated&revision=${revision}`
       this.mark('首项 id / title / src 已更新，key 保持不变')
     },
+    /** 追加具有独立标识的列表项，供动态插入后的监听器验证。 */
     addItem() { const index = ++this.itemSerial; this.items.push({ key: `sku-${index}`, id: `sku-${index}`, title: `新增商品 ${index}`, src: `/pages/route/route?from=added&item=${index}` }); this.mark('列表新增一项') },
+    /** 删除首项并反馈业务动作，核对列表移位后的上下文。 */
     removeFirstItem() { this.items.shift(); this.mark('列表删除首项') },
+    /** 恢复初始列表及其演示计数，便于重复执行验收场景。 */
     resetItems() { this.items = initialItems(); this.itemRevision = 0; this.itemSerial = 2; this.mark('列表已恢复初始值') },
+    /** 记录 Options API methods 的业务执行结果。 */
     onOptionsAction() { this.mark('Options API methods') },
+    /** 返回当前业务计数，验证括号箭头监听器保留返回值。 */
     onGroupedArrow() { this.mark('括号箭头调用'); return this.actionCount },
+    /** 提供对象返回箭头的业务结果，验证插桩不破坏外围语法。 */
     onObjectArrow() { this.mark('箭头对象返回'); return this.actionCount },
+    /** 提供多层括号箭头的业务结果。 */
     onNestedArrow() { this.mark('多层括号箭头'); return this.actionCount },
+    /** 记录由条件创建的按钮交互。 */
     onConditionalIf() { this.mark('v-if 按钮') },
+    /** 记录由显示开关控制的按钮交互。 */
     onConditionalShow() { this.mark('v-show 按钮') },
+    /** 切换条件创建状态，验证节点重新挂载后的监听器。 */
     onToggleIf(event) { this.showIf = event.detail.value; this.mark(`v-if：${this.showIf ? '显示' : '隐藏'}`) },
+    /** 切换节点可见状态，验证显示逻辑与采集互不干扰。 */
     onToggleVShow(event) { this.showVShow = event.detail.value; this.mark(`v-show：${this.showVShow ? '显示' : '隐藏'}`) },
+    /** 只反馈输入完成，不在页面展示输入原文。 */
     onInputComplete() { this.mark('输入完成（页面不展示输入原文）') },
+    /** 记录单独声明的 change 完成事件。 */
     onInputChange() { this.mark('独立 change 完成') },
+    /** 记录单独声明的 confirm 完成事件。 */
     onInputConfirm() { this.mark('独立 confirm 完成') },
+    /** 累计多完成事件控件的 change 业务调用次数。 */
     onCompletionChange() { this.completionCounts.change++; this.mark('三事件控件 change 业务') },
+    /** 累计多完成事件控件的 blur 业务调用次数。 */
     onCompletionBlur() { this.completionCounts.blur++; this.mark('三事件控件 blur 业务') },
+    /** 累计多完成事件控件的 confirm 业务调用次数。 */
     onCompletionConfirm() { this.completionCounts.confirm++; this.mark('三事件控件 confirm 业务') },
+    /** 更新动态忽略标记，供整条探针拒绝规则验证。 */
     togglePrivacyIgnore(event) { this.privacyIgnore = event.detail.value; this.mark('ignore 开关已更新') },
+    /** 更新动态敏感标记，验证禁止取值的短路顺序。 */
     togglePrivacySensitive(event) { this.privacySensitive = event.detail.value; this.mark('sensitive 开关已更新') },
+    /** 更新动态值采集授权，验证触发时 dataset 优先。 */
     togglePrivacyTrack(event) { this.privacyTrack = event.detail.value; this.mark('track 开关已更新') },
+    /** 只记录业务动作，用于观察隐私标记是否仅影响采集。 */
     onDynamicPrivacyAction() { this.mark('动态隐私按钮业务') },
+    /** 切换 false 或零等禁用标记样本，核对标记解释一致性。 */
     selectFalseMarker(event) { this.falseMarkerIndex = Number(event.detail.value); this.mark('禁用标记值已更新') },
+    /** 更新动态输入类型开关。 */
     toggleInputType(event) { this.numericInput = event.detail.value; this.mark('动态 type 已更新') },
+    /** 更新动态密码属性，验证敏感输入的保守拒绝规则。 */
     togglePassword(event) { this.maskPassword = event.detail.value; this.mark('动态 password 已更新') },
+    /** 填入预设长文本，供文案截断边界验证。 */
     fillLongText() { this.boundaryText = 'A'.repeat(120); this.mark('已填入预设长文本，请聚焦后失焦') },
+    /** 填入特殊字符样本，供控制字符清理与模板转义验证。 */
     fillSpecialText() { this.boundaryText = '演示<&>"\'\n第二行\t内容'; this.mark('已填入预设特殊字符，请聚焦后失焦') },
+    /** 清空边界样本，验证空值不会使业务交互消失。 */
     clearBoundaryText() { this.boundaryText = ''; this.mark('已清空文本，请聚焦后失焦') },
+    /** 更新滑块显示值，保留合法零值。 */
     onVolumeChange(event) { this.volume = event.detail.value; this.mark(`滑块：${this.volume}`) },
+    /** 显示单选的业务选择结果。 */
     onChoiceChange(event) { this.mark(`单选：${event.detail.value}`) },
+    /** 更新多选状态，分别展示有值和清空场景。 */
     onTagsChange(event) { this.selectedTags = event.detail.value; this.mark(this.selectedTags.length ? `多选：${this.selectedTags.join('、')}` : '多选：已全部取消') },
+    /** 保存动态 picker 下标并在业务侧展示实际城市。 */
     onCityChange(event) { this.city = Number(event.detail.value); this.mark(`城市：${this.cities[this.city].name}`) },
+    /** 更新动态多列选择下标，用于对照采集的下标回退。 */
     onColumnsChange(event) { this.columns = event.detail.value; this.mark(`多列下标：${this.columns.join('、')}`) },
+    /** 记录字面量字符串范围的选择下标。 */
     onLiteralCityChange(event) { this.literalCity = Number(event.detail.value); this.mark(`字面量城市下标：${this.literalCity}`) },
+    /** 记录字面量对象范围的选择下标。 */
     onLiteralPlanChange(event) { this.literalPlan = Number(event.detail.value); this.mark(`字面量对象下标：${this.literalPlan}`) },
+    /** 更新固定列下标，供静态显示文案映射验证。 */
     onStaticColumnsChange(event) { this.staticColumns = event.detail.value; this.mark(`固定列下标：${this.staticColumns.join('、')}`) },
+    /** 显示轮播下标与来源，用于区分手势和自动播放。 */
     onSwiperChange(event) { this.mark(`轮播：${event.detail.current}，来源：${event.detail.source || '代码'}`) },
+    /** 显示显式授权轮播的下标与来源。 */
     onTrackedSwiperChange(event) { this.mark(`放行轮播下标：${event.detail.current}，来源：${event.detail.source || '代码'}`) },
+    /** 切换授权轮播的自动播放状态。 */
     toggleTrackedAutoplay() { this.trackedAutoplay = !this.trackedAutoplay; this.mark('放行轮播自动播放已切换') },
+    /** 切换默认轮播的自动播放状态。 */
     onToggleAutoplay() { this.autoplay = !this.autoplay; this.mark(`自动轮播：${this.autoplay ? '开启' : '关闭'}`) },
+    /** 更新普通业务开关，同时供授权 change 值采集验证。 */
     onSwitchChange(event) { this.enabled = event.detail.value; this.mark(`订阅开关：${this.enabled ? '开启' : '关闭'}`) },
+    /** 记录被忽略按钮的业务执行，确认拒绝采集不阻断业务。 */
     onIgnoredAction() { this.mark('ignore 按钮业务已执行') },
+    /** 记录原始 target 带忽略标记时的业务调用。 */
     onIgnoredChildAction() { this.mark('target ignore 业务已执行') },
+    /** 打开不支持自动插桩的监听器边界演示页。 */
     goBoundary() { uni.navigateTo({ url: '/pages/autotrack-boundary/autotrack-boundary' }) },
   },
 }

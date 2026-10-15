@@ -2,9 +2,13 @@ import { describe, expect, it, vi } from 'vitest'
 import { publishNpmRelease } from '../../scripts/npm-publisher.js'
 import { releasePolicy } from '../../scripts/release-policy.js'
 
+/** 创建带状态码的包仓库 JSON 响应。 */
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status })
+/** 构造与待发布内容一致的版本完整性响应。 */
 const version = () => json({ dist: { integrity: 'same' } })
+/** 构造可调的正式渠道标签，用于防止渠道版本倒退。 */
 const tags = (latest = '1.0.0') => json({ latest })
+/** 按顺序消费预设包仓库响应并记录发布和等待调用。 */
 function fixture(responses: Response[]) {
   return { fetch: vi.fn(async () => { const response = responses.shift(); if (!response) throw new Error('unexpected_registry_read'); return response }), publish: vi.fn(), delay: vi.fn(async () => undefined) }
 }

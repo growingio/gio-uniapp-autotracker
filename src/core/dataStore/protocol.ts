@@ -46,6 +46,7 @@ const REQUIRED_COMMON_FIELDS = [
 
 const CUSTOM_EVENT_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,99}$/
 
+/** 校验 CUSTOM 名称以字母或下划线开头，且总长度不超过 100 个 ASCII 字符。 */
 export function isValidCustomEventName(value: unknown): value is string {
   return typeof value === 'string' && CUSTOM_EVENT_NAME.test(value)
 }
@@ -64,7 +65,7 @@ const FIELD_ENUMS: Readonly<Record<string, readonly string[]>> = {
   orientation: ['PORTRAIT', 'LANDSCAPE'],
 }
 
-/** Checks retained wire values; missing system fields remain compatible with sanitized caches. */
+/** 校验保留的出站字段，兼容缓存中已被清理的公共空字段。 */
 function validWireField(key: string, value: unknown): boolean {
   switch (key) {
     case 'eventSequenceId': return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
@@ -81,21 +82,24 @@ function validWireField(key: string, value: unknown): boolean {
   }
 }
 
+/** 识别出站应省略的空值，同时保留有意义的数字零和布尔 false。 */
 function isEmptyOutboundValue(value: unknown): boolean {
   if (value === null || value === undefined || value === '') return true
   if (Array.isArray(value)) return value.length === 0
   return typeof value === 'object' && Object.keys(value).length === 0
 }
 
-/** Removes wire-empty values after a caller has built a whitelisted event. */
+/** 在字段白名单裁剪后移除出站空值，保留零和 false。 */
 export function sanitizeOutboundEvent(event: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
   return Object.fromEntries(Object.entries(event).filter(([, value]) => !isEmptyOutboundValue(value)))
 }
 
+/** 按 Unicode 码点截断字符串，避免拆开合法代理对。 */
 function truncate(value: string, max: number): string {
   return Array.from(value).slice(0, max).join('')
 }
 
+/** 将受支持的基础值和有效 Date 转为属性字符串；不支持的值返回 null。 */
 function normalizeAttributeScalar(value: unknown): string | null {
   if (value === null || value === undefined) return ''
   if (typeof value === 'string' || typeof value === 'boolean') return String(value)
@@ -104,6 +108,7 @@ function normalizeAttributeScalar(value: unknown): string | null {
   return null
 }
 
+/** 统一属性键和值的长度、数组拼接和冲突处理，丢弃非法属性并返回诊断。 */
 export function normalizeAttributes(input: unknown): NormalizedAttributes {
   const attributes = new Map<string, string>()
   const diagnostics: AttributeDiagnostic[] = []
@@ -136,6 +141,7 @@ export function normalizeAttributes(input: unknown): NormalizedAttributes {
   return { attributes, diagnostics }
 }
 
+/** 按事件白名单裁剪并校验报文。缓存恢复允许省略已清理的公共空字段，事件专属必填项仍严格检查。 */
 export function buildAppEvent(eventType: string, fields: Readonly<Record<string, unknown>>, restored = false): BuildEventResult {
   if (!APP_EVENT_TYPES.includes(eventType as AppEventType)) return { ok: false, code: 'invalid_event_type' }
   const typedEventType = eventType as AppEventType
@@ -146,8 +152,8 @@ export function buildAppEvent(eventType: string, fields: Readonly<Record<string,
   const candidate = Object.fromEntries(
     Object.entries({ ...fields, eventType: typedEventType }).filter(([key]) => allowed.has(key)),
   )
-  // Common fields retain the established contract: present but empty values may be omitted from
-  // the wire payload. Event-specific required fields, however, must still exist after cleanup.
+  // 公共字段沿用既有契约，已提供的空值可以在出站报文中省略。
+  // 事件专属必填字段在空值清理后仍须存在。
   // 缓存保存的是已清理空字段的上报事件，恢复时不再要求这些公共字段存在。
   if (!restored && REQUIRED_COMMON_FIELDS.some((key) => !(key in candidate))) return { ok: false, code: 'missing_required_field' }
   const event = sanitizeOutboundEvent(candidate)

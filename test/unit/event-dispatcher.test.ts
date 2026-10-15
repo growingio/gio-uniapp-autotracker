@@ -19,6 +19,7 @@ const system: AppSystemContext = {
   deviceType: 'PHONE', appVersion: '1.0.0', language: 'zh-CN', sdkVersion: '0.1.0',
 }
 
+/** 创建事件分发器及其真实组装和队列依赖，以核对最终报文。 */
 function createDispatcher() {
   const sessions = new SessionManager(config.sessionPolicy, () => 'session-1')
   sessions.resume(0)

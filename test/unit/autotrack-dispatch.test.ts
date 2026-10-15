@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { AutoTrackDispatcher, dispatchAutoTrack, installAutoTrackDispatcher } from '../../src/plugins/gioEventAutoTracking/index.js'
 
 const click = { schemaVersion: 2, source: 'template', kind: 'click', eventName: 'save' } as const
+/** 构造带稳定目标和可调时间戳的点击事件，隔离去重条件。 */
 const event = (timeStamp: unknown = 10, id = 'buy', type = 'tap') => ({ type, timeStamp, currentTarget: { id, dataset: { title: 'Buy' } } })
 
 describe('autotrack dispatcher', () => {

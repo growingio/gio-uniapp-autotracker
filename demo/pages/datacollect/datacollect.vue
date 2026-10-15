@@ -28,20 +28,31 @@
 <script>
 import { dataCollectionState } from '../../sdk-state'
 export default {
+  /** 初始化暂停恢复场景的关联标识、观察时间和业务计数。 */
   data() { return { result: '尚未操作。', resumeRunId: '', pausedAt: 0, collectionRunCount: 0, viewClickCount: 0, viewInputCount: 0 } },
-  computed: { collecting() { return dataCollectionState.enabled } },
+  computed: {
+    /** 读取与初始化配置一致的演示采集开关状态。 */
+    collecting() { return dataCollectionState.enabled }
+  },
   methods: {
+    /** 调用唯一可变配置并在接纳后同步页面状态。 */
     toggle(event) {
       const next = event.detail.value
       const ok = gdp('setOptions', { dataCollect: next })
       if (ok) { dataCollectionState.enabled = next; this.resumeRunId = '' }
       this.result = ok ? `setOptions({ dataCollect: ${next} }) 成功。` : 'setOptions 失败。'
     },
+    /** 尝试发送采集开关对照事件，展示本地门控结果。 */
     track() { this.result = gdp('track', 'datacollect_test_event', { collecting: this.collecting }) ? '事件已入队。' : '事件未入队：采集关闭或 SDK 未就绪。' },
+    /** 提交非布尔采集开关，验证非法配置被拒绝。 */
     invalidOptions() { this.result = gdp('setOptions', { dataCollect: 'yes' }) ? '异常：非法参数被接受。' : '非法参数已正确拒绝。' },
+    /** 提交额外配置字段，验证运行时不接受多项配置变更。 */
     multipleOptions() { this.result = gdp('setOptions', { dataCollect: true, debug: true }) ? '异常：多字段配置被接受。' : '多字段配置已正确拒绝：运行时只允许 dataCollect。' },
+    /** 只累计点击业务次数，供采集关闭期间的业务行为对照。 */
     viewClick() { this.viewClickCount++ },
+    /** 只累计输入完成次数，不读取输入原文。 */
     viewInput() { this.viewInputCount++ },
+    /** 发送暂停前标记并关闭采集，验证关闭期间新事件被拒绝。 */
     pauseScenario() {
       const runId = `collection-${Date.now()}-${++this.collectionRunCount}`
       if (!gdp('track', 'review_collection_before_pause', { runId }) || !gdp('setOptions', { dataCollect: false })) {
@@ -55,6 +66,7 @@ export default {
       this.result = blocked ? `${runId}：采集已暂停，关闭期间事件返回 false。等待几秒后点第 2 步。` : '异常：采集关闭期间仍接受事件。请继续恢复并检查事件流。'
       return blocked
     },
+    /** 恢复采集并发送关联标记，供核对新会话与 PAGE 显示时间。 */
     resumeScenario() {
       if (!this.resumeRunId) { this.result = '请先完成第 1 步。'; return false }
       if (!gdp('setOptions', { dataCollect: true })) { this.result = '恢复失败，采集仍关闭，可重试第 2 步。'; return false }

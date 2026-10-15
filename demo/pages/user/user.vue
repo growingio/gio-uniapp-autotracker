@@ -33,36 +33,60 @@
 
 <script>
 export default {
+  /** 初始化身份输入、场景次数和结果提示。 */
   data() {
     return { userId: 'demo-user-001', userKey: 'demo-key', identityRunCount: 0, result: '尚未操作。' }
   },
   methods: {
+    /** 保留业务输入完成监听，不主动读取身份输入原文。 */
     onInputBlur() {},
+    /** 提交页面中的用户身份与可选 userKey，展示命令接纳结果。 */
     setUser() {
       const ok = gdp('setUserId', this.userId, this.userKey || null)
       this.result = ok ? '身份已更新；空字符串会清除身份，下一条事件使用当前身份。' : '身份未更新：参数无效或 SDK 尚未就绪。'
     },
+    /** 清除登录身份并展示结果。 */
     clearUser() {
       const ok = gdp('clearUserId')
       this.result = ok ? '用户身份已清除。' : '清除失败：SDK 尚未就绪。'
     },
+    /** 发送固定用户属性，验证用户属性事件链路。 */
     setAttributes() {
       const ok = gdp('setUserAttributes', { membership: 'demo', source: 'user_page' })
       this.result = ok ? '用户属性事件已入队。' : '未入队：先开启采集开关。'
     },
+    /** 设置显式业务位置，供后续事件公共字段核对。 */
     setLocation() { this.result = gdp('setLocation', 30.2741, 120.1551) ? '位置已设置；后续事件会携带经纬度。' : '位置未设置。' },
+    /** 清除内存位置，后续事件不再附加原经纬度。 */
     clearLocation() { this.result = gdp('clearLocation') ? '位置已清除；后续事件不再携带经纬度。' : '位置清除失败：SDK 尚未就绪。' },
+    /** 提交非字符串用户标识，验证既有合法身份保持不变。 */
     invalidUser() { this.result = gdp('setUserId', 12345) ? '异常：非字符串 userId 被接受。' : '非字符串 userId 已正确拒绝，既有身份不会被清除。' },
+    /** 提交越界经纬度，验证非法位置不会覆盖现有状态。 */
     invalidLocation() { this.result = gdp('setLocation', 91, 120) ? '异常：越界位置被接受。' : '越界位置已正确拒绝，既有位置不会变化。' },
+    /** 执行同一账号登录、退出、再登录场景，核对会话连续性。 */
     sameUserScenario() { return this.runIdentityScenario('a') },
+    /** 执行换账号场景，核对新会话与 VISIT。 */
     differentUserScenario() { return this.runIdentityScenario('b') },
+    /** 按顺序执行身份变更并发送关联标记；中途失败时保留已完成操作。 */
     runIdentityScenario(finalUser) {
       const runId = `identity-${Date.now()}-${++this.identityRunCount}`
       const scenario = finalUser === 'a' ? 'same_user' : 'different_user'
       const steps = [
-        { phase: 'login_a', apply: () => gdp('setUserId', 'demo-review-user-a', 'demo-review-key') },
-        { phase: 'logout', apply: () => gdp('clearUserId') },
-        { phase: `login_${finalUser}`, apply: () => gdp('setUserId', `demo-review-user-${finalUser}`, 'demo-review-key') },
+        {
+          phase: 'login_a',
+          /** 执行当前步骤的登录或退出命令，返回 SDK 是否接纳。 */
+          apply: () => gdp('setUserId', 'demo-review-user-a', 'demo-review-key')
+        },
+        {
+          phase: 'logout',
+          /** 执行当前步骤的登录或退出命令，返回 SDK 是否接纳。 */
+          apply: () => gdp('clearUserId')
+        },
+        {
+          phase: `login_${finalUser}`,
+          /** 执行当前步骤的登录或退出命令，返回 SDK 是否接纳。 */
+          apply: () => gdp('setUserId', `demo-review-user-${finalUser}`, 'demo-review-key')
+        },
       ]
       for (const step of steps) {
         if (!step.apply() || !gdp('track', 'review_identity_step', { runId, scenario, phase: step.phase })) {
@@ -73,6 +97,7 @@ export default {
       this.result = `${runId}：三条标记事件已入队，当前为演示账号 ${finalUser.toUpperCase()}。请在事件 JSON 核对身份和 sessionId；入队不代表 collector 已接收。`
       return true
     },
+    /** 提交非法代理项身份，验证拒绝前后合法身份与会话不被破坏。 */
     invalidEncodingScenario() {
       const runId = `encoding-${Date.now()}-${++this.identityRunCount}`
       if (!gdp('setUserId', 'demo-review-user-a', 'demo-review-key') || !gdp('track', 'review_identity_encoding', { runId, phase: 'before' })) {

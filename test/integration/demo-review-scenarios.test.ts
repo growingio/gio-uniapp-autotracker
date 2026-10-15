@@ -19,8 +19,10 @@ type Fixture = ReturnType<typeof mountAutoTrackSfc>
 const fixtures: Fixture[] = []
 afterEach(() => { fixtures.splice(0).forEach(fixture => fixture.unmount()); vi.unstubAllGlobals() })
 
+/** 释放固定轮数的微任务，等待初始化和持久化等受控异步工作。 */
 async function settle(): Promise<void> { for (let i = 0; i < 20; i++) await Promise.resolve() }
 
+/** 装配真实 demo 组件与受控宿主，捕获实际协议事件用于场景验收。 */
 async function demo(route: string, initialNetwork = 'wifi') {
   vi.resetModules()
   vi.stubGlobal('__GIO_AUTOTRACK_VERIFICATION__', true)
@@ -37,7 +39,7 @@ async function demo(route: string, initialNetwork = 'wifi') {
     getSystemInfoSync: () => ({ screenWidth: 390, screenHeight: 844 }),
     getAppBaseInfo: () => ({ appName: 'Demo', appVersion: '1.0', packageName: 'com.example.demo' }),
     getNetworkType: options => { options.success({ networkType: network }) },
-    // Deliberately no network-status subscription: recovery must also work on App show.
+    // 有意不提供网络状态订阅，验证回前台时仍能恢复上传。
     request: options => {
       if (network === 'none') { options.fail({ errMsg: 'offline' }); return }
       received.push(...JSON.parse(options.data) as ProtocolEvent[])
@@ -47,7 +49,7 @@ async function demo(route: string, initialNetwork = 'wifi') {
   vi.stubGlobal('uni', host)
   const { default: gdp } = await import('../../index.js')
   const { dispatchAutoTrack } = await import('../../autotrack.js')
-  // The instance is used only to await hydration in tests; demo pages use public commands.
+  // 测试仅借内部实例等待状态恢复，demo 页面仍使用公开命令。
   let tracker!: TrackerRuntime
   let hooks!: Hooks
   expect(gdp('registerPlugins', [{ name: 'gioEventAutoTracking' }, { name: 'demo-test-readiness', install: instance => { tracker = instance } }])).toBe(true)
@@ -70,7 +72,7 @@ async function demo(route: string, initialNetwork = 'wifi') {
     const componentSource = readFileSync(resolve(import.meta.dirname, `../../demo/components/${name}/${name}.vue`), 'utf8')
     modules[`@/components/${name}/${name}.vue`] = { default: compileAutoTrackSfc(componentSource, dispatch).component }
   }
-  // uni-link must mount its actual navigator and emit path, rather than a native-tag stub.
+  // uni-link 须挂载真实 navigator 并执行 emit，不能用原生标签替身跳过组件逻辑。
   const fixture = mountAutoTrackSfc(source, dispatch, modules, true, ['uni-link'])
   fixtures.push(fixture)
   expect(fixture.transformed.warnings).toEqual([])
@@ -78,6 +80,7 @@ async function demo(route: string, initialNetwork = 'wifi') {
 }
 
 let eventSequence = 0
+/** 依据当前渲染节点构造 dataset 和目标快照，避免使用过期静态元数据。 */
 function nativeEvent(fixture: Fixture, id: string, name = 'onClick', detail: unknown = {}) {
   const node = fixture.elements().find(element => element.props.id === id)
   if (!node) throw new Error(`demo_control_missing:${id}`)
@@ -86,15 +89,18 @@ function nativeEvent(fixture: Fixture, id: string, name = 'onClick', detail: unk
   const target = { id, type: node.type, dataset }
   return { type: name.slice(2).toLowerCase(), timeStamp: eventSequence += 20, currentTarget: target, target, detail, stopPropagation: vi.fn(), preventDefault: vi.fn() }
 }
+/** 触发目标节点的真实监听器，并保留其业务返回结果。 */
 function fireEvent(fixture: Fixture, id: string, name: string, event: unknown) {
   const node = fixture.elements().find(element => element.props.id === id)
   const handler = node?.props[name]
   if (typeof handler !== 'function') throw new Error(`demo_handler_missing:${id}:${name}`)
   return handler(event)
 }
+/** 按控件标识生成宿主事件后触发实际编译监听器。 */
 function fire(fixture: Fixture, id: string, name = 'onClick', detail: unknown = {}) {
   return fireEvent(fixture, id, name, nativeEvent(fixture, id, name, detail))
 }
+/** 从接收事件中筛选指定业务事件名，供场景关联断言。 */
 function named(events: ProtocolEvent[], name: string): ProtocolEvent[] { return events.filter(event => event.eventName === name) }
 
 describe('实际 demo 页面中的修复场景', () => {

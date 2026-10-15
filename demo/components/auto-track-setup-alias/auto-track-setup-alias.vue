@@ -11,8 +11,10 @@
 import { ref } from 'vue'
 
 export default {
+  /** 创建组件局部状态，并通过返回别名暴露业务方法。 */
   setup() {
     const count = ref(0)
+    /** 更新局部业务计数，验证 setup 返回别名不会改变调用语义。 */
     const saveOrder = () => { count.value += 1 }
     return { count, submit: saveOrder }
   },

@@ -1,7 +1,4 @@
-/**
- * UUID v4 generator kept byte-for-byte compatible with the mini-program SDK's `guid` shape.
- * It intentionally uses Math.random so it also works in the JavaScript runtimes bundled by App.
- */
+/** 保持与小程序 SDK 相同的 UUID v4 格式，使用 Math.random 以兼容 App 内置 JavaScript 运行时。 */
 export function guid(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (character) => {
     const random = (Math.random() * 16) | 0
@@ -10,16 +7,17 @@ export function guid(): string {
   })
 }
 
-/** RFC 3492 §6.1/6.3, using its Punycode parameters; no Node or browser APIs. */
+/** 按 RFC 3492 第 6.1 和 6.3 节及其 Punycode 参数编码，不依赖 Node 或浏览器 API。 */
 function encodeLabel(label: string): string | null {
   const points = Array.from(label, (character) => character.codePointAt(0)!)
-  // DNS labels are bounded. This also bounds the encoder's repeated scans.
+  // DNS 标签有长度上限，同时限制编码器反复扫描的工作量。
   if (points.length > 63) return null
   let output = points.filter((point) => point < 128).map((point) => String.fromCharCode(point)).join('')
   const basic = output.length
   let handled = basic
   if (basic > 0) output += '-'
   let next = 128, delta = 0, bias = 72
+  /** 按 Punycode 字母表编码一个数位。 */
   const digit = (value: number): string => String.fromCharCode(value < 26 ? 97 + value : 22 + value)
   while (handled < points.length) {
     const minimum = Math.min(...points.filter((point) => point >= next))
@@ -51,10 +49,8 @@ function encodeLabel(label: string): string | null {
 }
 
 /**
- * App fallback for common IDNs: normalize width/dots/case, reject control,
- * private-use, unpaired-surrogate and leading-mark labels, then RFC 3492 encode.
- * This deliberately is not a complete UTS #46 implementation. Hosts with URL
- * use their full IDNA implementation; this path needs no Unicode mapping table.
+ * 为缺少 URL 的 App 提供常见国际化域名回退：规范宽度、分隔点和大小写，拒绝控制符、私用字符、未配对代理项及首位组合标记，再执行 RFC 3492 编码。
+ * 此处不实现完整 UTS #46；具备 URL 的宿主使用自身 IDNA 实现，回退路径不依赖额外 Unicode 映射表。
  */
 function asciiDomain(host: string): string | null {
   const normalized = host.replace(/[\u3002\uFF0E\uFF61]/g, '.').normalize('NFKC')
@@ -71,6 +67,7 @@ function asciiDomain(host: string): string | null {
   return result === '' ? null : result
 }
 
+/** 解析 IPv4 段允许的十进制、八进制或十六进制表示，非法值返回 null。 */
 function ipv4Number(part: string): number | null {
   if (part === '') return null
   const hex = /^0x/i.test(part)
@@ -81,7 +78,7 @@ function ipv4Number(part: string): number | null {
   return Number.isSafeInteger(result) ? result : null
 }
 
-/** WHATWG URL §3.5: retain legacy IPv4 input forms, serialize dotted decimal. */
+/** 沿用 WHATWG URL 第 3.5 节的兼容 IPv4 输入形式，统一输出点分十进制。 */
 function normalizeIpv4(host: string): string | null {
   const parts = host.split('.')
   if (parts.length > 1 && parts[parts.length - 1] === '') parts.pop()
@@ -96,6 +93,7 @@ function normalizeIpv4(host: string): string | null {
   return [24, 16, 8, 0].map((shift) => (address >>> shift) & 255).join('.')
 }
 
+/** 验证带方括号的 IPv6 主机字面量及压缩段数。 */
 function validIpv6(host: string): boolean {
   let address = host.slice(1, -1)
   if (address.includes('.')) {
@@ -111,6 +109,7 @@ function validIpv6(host: string): boolean {
     (halves.length === 2 ? groups.length < 8 : groups.length === 8)
 }
 
+/** 规范采集服务的域名或 IP 主机，过滤非法编码与地址形态。 */
 export function normalizeCollectorHost(host: string): string | null {
   if (host.startsWith('[')) return validIpv6(host) ? host.toLowerCase() : null
   const domain = asciiDomain(host)

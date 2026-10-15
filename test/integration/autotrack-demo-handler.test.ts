@@ -12,6 +12,7 @@ import { mountAutoTrackSfc } from '../support/autotrack-fixture.js'
 const pagePath = resolve(import.meta.dirname, '../../demo/pages/autotrack/autotrack.vue')
 const pageSource = readFileSync(pagePath, 'utf8')
 
+/** 从真实 demo 模板提取唯一条件按钮，避免复制待测表达式。 */
 function conditionalButton(): string {
   const { descriptor, errors } = parseSfc(pageSource)
   if (errors.length > 0 || descriptor.template === null) throw new Error('demo 页面解析失败')
@@ -30,10 +31,11 @@ function conditionalButton(): string {
   return matches[0]!.loc.source
 }
 
+/** 隔离挂载真实条件按钮，并注入可核对返回值的业务方法。 */
 function mountButton(dispatch: (...args: unknown[]) => unknown, template = conditionalButton()) {
   const onAction = vi.fn(() => 'action-result')
   const onInputComplete = vi.fn(() => 'input-result')
-  // 读取真实按钮源码，隔离页面其他控件；由 Vue 编译并执行 listener，避免复制待测表达式。
+  // 读取真实按钮源码，隔离页面其他控件；由 Vue 编译并执行事件监听函数，避免复制待测表达式。
   const source = `<script setup>
     import { ref } from 'vue'
     import { onAction, onInputComplete } from 'fixture'

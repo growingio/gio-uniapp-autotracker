@@ -11,6 +11,7 @@
 import { ref } from 'vue'
 
 const count = ref(0)
+/** 累加业务点击次数，验证脚本 setup 形式的监听器能够正常执行。 */
 function submit() { count.value += 1 }
 </script>
 

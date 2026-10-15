@@ -11,10 +11,14 @@
 
 <script>
 export default {
+  /** 初始化当前路由参数的展示文本。 */
   data() { return { queryText: '无 query。' } },
+  /** 展示本次实际导航 query，供与 PAGE 快照对照。 */
   onLoad(query) { this.queryText = Object.keys(query || {}).length ? JSON.stringify(query) : '无 query。' },
   methods: {
+    /** 压入同路由的新实例，验证页面身份与来源区分。 */
     openNext() { uni.navigateTo({ url: `/pages/route/route?from=route&step=${Date.now()}&tag=next` }) },
+    /** 切回首页 tab，验证页面上下文恢复。 */
     backHome() { uni.switchTab({ url: '/pages/index/index' }) },
   },
 }

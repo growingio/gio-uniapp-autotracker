@@ -25,7 +25,7 @@ describe('identity xor-utf8-v1 codec', () => {
     expect(decryptIdentityValue(`${GIO_IDENTITY_CIPHER_PREFIX}abc=`, 'source')).toBeNull()
     expect(decryptIdentityValue(`${GIO_IDENTITY_CIPHER_PREFIX}A`, 'source')).toBeNull()
     expect(decryptIdentityValue(`${GIO_IDENTITY_CIPHER_PREFIX}AB`, 'source')).toBeNull()
-    // A lone UTF-8 continuation byte remains invalid after the documented key derivation.
+    // 按当前掩码推导后，孤立 UTF-8 续字节仍须被判为非法编码。
     expect(decryptIdentityValue(`${GIO_IDENTITY_CIPHER_PREFIX}mA`, 'source')).toBeNull()
   })
 

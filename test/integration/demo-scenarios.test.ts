@@ -18,10 +18,12 @@ type LifecycleHooks = Readonly<{
   onUnload: (this: Record<string, unknown>) => void
 }>
 
+/** 读取实际 demo 文件，确保测试随交付示例同步变化。 */
 function demoFile(path: string): string {
   return readFileSync(resolve(import.meta.dirname, '..', '..', 'demo', path), 'utf8')
 }
 
+/** 创建带内存存储、确定系统信息和请求记录的受控 App 宿主。 */
 function demoHost(received: ProtocolEvent[]): AppRuntimeHost {
   const storage = new Map<string, unknown>()
   return {

@@ -1,15 +1,20 @@
 import type { AppPlatform, AppSystemContext, SystemContextPort } from '../types/index.js'
 
 export interface AppSystemApi {
+  /** 读取设备平台、型号和屏幕等信息，结果由端口安全裁剪。 */
   getDeviceInfo(): unknown
+  /** 读取同步系统信息，作为设备字段及窗口信息的兼容回退。 */
   getSystemInfoSync(): unknown
+  /** 读取应用版本、包标识和语言等应用上下文。 */
   getAppBaseInfo(): unknown
 }
 
+/** 将宿主系统结果限制为对象，不可用时返回空记录。 */
 function record(value: unknown): Readonly<Record<string, unknown>> {
   return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Readonly<Record<string, unknown>> : {}
 }
 
+/** 隔离宿主读取异常，使单项缺失不破坏其余系统字段。 */
 function safeRecord(read: () => unknown): Readonly<Record<string, unknown>> {
   try {
     return record(read())
@@ -18,6 +23,7 @@ function safeRecord(read: () => unknown): Readonly<Record<string, unknown>> {
   }
 }
 
+/** 读取非空去空白字符串，否则使用协议允许的回退值。 */
 function text(value: unknown, fallback = ''): string {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : fallback
 }
@@ -41,6 +47,7 @@ function nativeDomain(target: AppPlatform): string {
   return ''
 }
 
+/** 将宿主平台名称转换为 Android、iOS 或 HarmonyOS，其他平台不予初始化。 */
 function platform(value: unknown): AppPlatform | null {
   const normalized = text(value).toLowerCase()
   if (normalized === 'android') return 'Android'
@@ -49,14 +56,17 @@ function platform(value: unknown): AppPlatform | null {
   return null
 }
 
+/** 只接受有限正数尺寸，避免非法值参与物理像素换算。 */
 function dimension(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null
 }
 
+/** 校验设备像素比，缺失或非法时交由上层选择回退。 */
 function pixelRatio(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null
 }
 
+/** 归一化语言与地区标记；无法识别的基础语言使用 und。 */
 function language(value: unknown): string {
   const source = text(value)
   if (source === '') return 'und'
@@ -66,20 +76,23 @@ function language(value: unknown): string {
   return [base, ...parts.slice(1).map((part) => part.length === 4 ? `${part[0]?.toUpperCase() ?? ''}${part.slice(1).toLowerCase()}` : part.toUpperCase())].join('-')
 }
 
+/** 将可识别的设备形态转换为协议枚举，其他值为 UNKNOWN。 */
 function deviceType(value: unknown): AppSystemContext['deviceType'] {
   const normalized = text(value).toUpperCase()
   return normalized === 'PHONE' || normalized === 'PAD' || normalized === 'FOLD' ? normalized : 'UNKNOWN'
 }
 
-/** Android classifies tablet layouts at a 600dp shortest edge. */
+/** Android 使用逻辑短边是否达到 600dp 区分平板布局。 */
 function androidDeviceType(screenWidth: number): AppSystemContext['deviceType'] {
   return screenWidth > 0 ? (screenWidth >= 600 ? 'PAD' : 'PHONE') : 'UNKNOWN'
 }
 
-/** Converts standard uni system reads to protocol-ready App context without exposing raw host objects. */
+/** 将标准 uni 系统信息转换为协议上下文，不向核心暴露原始宿主对象。 */
 export class AppSystemContextPort implements SystemContextPort {
+  /** 绑定系统 API、SDK 版本及业务应用版本回退值。 */
   public constructor(private readonly api: AppSystemApi, private readonly sdkVersion: string, private readonly appVersionFallback: string | null) {}
 
+  /** 安全合并设备、系统和应用信息，转换物理屏幕尺寸并输出纯协议上下文。 */
   public async load(): Promise<AppSystemContext> {
     const device = safeRecord(() => this.api.getDeviceInfo())
     const system = safeRecord(() => this.api.getSystemInfoSync())

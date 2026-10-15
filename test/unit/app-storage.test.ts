@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { AppStoragePort, type AppStorageApi } from '../../src/platform/uni.js'
 
+/** 创建同步存储宿主替身，供端口的成功与失败分类验证。 */
 function api(overrides: Partial<AppStorageApi> = {}): AppStorageApi {
   return {
     getStorageSync: () => undefined,

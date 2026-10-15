@@ -5,10 +5,12 @@ import type { TransportPort, TransportResult } from '../../src/types/index.js'
 import { Uploader, type UploaderRuntime } from '../../src/core/uploader.js'
 import type { ProtocolEvent } from '../../src/core/dataStore/protocol.js'
 
+/** 构造上传测试的合法协议事件。 */
 function event(sequence: number): ProtocolEvent {
   return { eventType: 'CUSTOM', eventName: `event_${sequence}`, eventSequenceId: sequence } as ProtocolEvent
 }
 
+/** 提供可推进时间与确定随机值，验证并发、超时和退避调度。 */
 function runtime(): { value: UploaderRuntime; fireDelay: (delay: number) => void; scheduledDelays: () => number[] } {
   const callbacks = new Map<number, { delay: number; callback: () => void }>()
   let nextHandle = 1
@@ -93,7 +95,7 @@ describe('Uploader', () => {
     uploader.schedule()
     const forced = uploader.forceFlush()
     expect(callbacks).toHaveLength(1)
-    // Only the transport deadline and the background flush deadline remain.
+    // 此时只应保留请求超时和后台刷新等待两个定时器。
     expect(clocks.scheduledDelays()).toEqual([5_000, 1_000])
     callbacks[0]!({ kind: 'network' })
     clocks.fireDelay(800)

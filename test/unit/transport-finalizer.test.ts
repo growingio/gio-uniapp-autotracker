@@ -5,6 +5,7 @@ import type { TransportPort, TransportRequest, TransportResult } from '../../src
 
 const request: TransportRequest = { url: 'https://collector.example', method: 'POST', headers: {}, body: '[]', timeoutMs: 5_000 }
 
+/** 提供可手动推进的定时器，验证超时、中止和重复回调的唯一结算。 */
 function fakeTimer(): { timer: TimerPort; fire: () => void; cleared: () => boolean } {
   let callback: (() => void) | null = null
   let wasCleared = false

@@ -7,6 +7,7 @@ import type { StoragePort } from '../../src/types/index.js'
 import type { ProtocolEvent } from '../../src/core/dataStore/protocol.js'
 import { APP_EVENT_FIXTURES } from '../contracts/app-protocol.fixture.js'
 
+/** 创建可恢复的合法协议事件，供队列信封与写入顺序测试。 */
 function event(sequence: number): ProtocolEvent {
   const built = buildAppEvent('CUSTOM', {
     deviceId: 'device', sessionId: 'session', dataSourceId: 'source', platform: 'Android', platformVersion: '14', timestamp: sequence,
@@ -18,6 +19,7 @@ function event(sequence: number): ProtocolEvent {
   return built.event
 }
 
+/** 创建可观察快照和写入结果的队列存储替身。 */
 function storage(initial: string | null = null): { port: StoragePort; values: () => string[] } {
   let value = initial
   const values: string[] = []

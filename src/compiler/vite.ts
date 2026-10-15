@@ -15,16 +15,20 @@ type Replacement = Readonly<{ start: number; end: number; value: string }>
 const inputEvents = ['change', 'blur', 'confirm']
 const textRenderingDirectives = new Set(['for', 'if', 'else-if', 'else', 'show', 'text', 'html'])
 const marker = '#__GIO_AUTOTRACK_V2__'
+/** 将静态文本编码为安全的 JavaScript 字符串字面量。 */
 function literal(value: string): string { return JSON.stringify(value) }
+/** 转义模板属性中的特殊字符，避免生成的监听器破坏 HTML 语法。 */
 function attribute(value: string): string { return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;') }
+/** 按源码偏移从后向前应用替换，保持尚未处理的位置有效。 */
 function apply(source: string, replacements: Replacement[]): string {
   for (const replacement of replacements.sort((a, b) => b.start - a.start)) source = source.slice(0, replacement.start) + replacement.value + source.slice(replacement.end)
   return source
 }
+/** 只提取可安全复制的静态绑定；可能被覆盖的授权和元数据不作回填。 */
 function bound(element: ElementNode, name: string, preserveExclusion = false): string | null {
-  // A spread/dynamic key can remove or replace a literal binding at render time.
-  // Its former value must never become fallback consent or stale event metadata.
-  // Positive static ignore/sensitive markers remain conservative exclusions.
+  // 展开绑定或动态属性名可能在渲染时移除或替换字面量绑定。
+  // 旧值不能回填为采集授权或已经失效的事件元数据。
+  // 静态启用的 ignore 和 sensitive 标记仍按保守拒绝规则处理。
   if (!preserveExclusion && element.props.some((prop) => prop.type === NodeTypes.DIRECTIVE && prop.name === 'bind'
     && (prop.arg === undefined || prop.arg.type !== NodeTypes.SIMPLE_EXPRESSION || !prop.arg.isStatic
       || (prop.arg.content === name && prop.modifiers.length > 0)))) return null
@@ -35,12 +39,14 @@ function bound(element: ElementNode, name: string, preserveExclusion = false): s
   }
   return null
 }
+/** 检查目标属性是否可能受直接绑定、展开或动态属性名影响。 */
 function hasBound(element: ElementNode, name: string): boolean {
   return element.props.some((prop) => prop.type === NodeTypes.DIRECTIVE && prop.name === 'bind'
     && (prop.arg === undefined || prop.arg.type !== NodeTypes.SIMPLE_EXPRESSION || !prop.arg.isStatic || prop.arg.content === name))
 }
+/** 只认可可静态确认且不会被覆盖的忽略标记，用于抑制非必要告警。 */
 function explicitlyIgnored(element: ElementNode): boolean {
-  // A spread or dynamic attribute can override ignore. Keep diagnostics in that case.
+  // 展开或动态属性可能覆盖 ignore，此时仍需保留采集边界诊断。
   if (element.props.some(prop => prop.type === NodeTypes.DIRECTIVE && prop.name === 'bind'
     && (prop.arg === undefined || prop.arg.type !== NodeTypes.SIMPLE_EXPRESSION || !prop.arg.isStatic))) return false
   const markers = element.props.filter(prop => prop.type === NodeTypes.ATTRIBUTE ? prop.name === 'data-growing-ignore'
@@ -57,12 +63,14 @@ function explicitlyIgnored(element: ElementNode): boolean {
   }
   return value === true || value === '' || value === 'true' || value === 1 || value === '1'
 }
+/** 保守识别密码、文件及动态敏感输入属性，禁止探针读取其内容。 */
 function sensitive(element: ElementNode): boolean {
   if (element.tag !== 'input' && element.tag !== 'textarea') return false
   return hasBound(element, 'type') || hasBound(element, 'password') || element.props.some((prop) => prop.type === NodeTypes.ATTRIBUTE
     && ((prop.name === 'type' && ['password', 'safe-password', 'file'].includes(prop.value?.content.toLowerCase() ?? ''))
       || (prop.name === 'password' && prop.value?.content !== 'false')))
 }
+/** 递归提取确定会显示的 view/text 文字；动态或条件渲染时返回 null。 */
 function staticText(element: ElementNode): string | null {
   if (!['view', 'text'].includes(element.tag)) return null
   if (element.props.some((prop) => prop.type === NodeTypes.DIRECTIVE
@@ -77,6 +85,7 @@ function staticText(element: ElementNode): string | null {
 }
 
 // picker-view 本身没有 range 属性；从固定列的简单选项模板取得 range，复杂渲染保留下标回退。
+/** 从固定 picker-view 列恢复安全的静态选项；无法确认显示文案时回退下标。 */
 function pickerColumns(element: ElementNode): { range: string; key: string | null } | null {
   const ranges: string[] = []
   const keys: (string | null)[] = []
@@ -111,6 +120,7 @@ function pickerColumns(element: ElementNode): { range: string; key: string | nul
   }
   return ranges.length > 0 && keys.every((key) => key === keys[0]) ? { range: `[${ranges.join(',')}]`, key: keys[0] ?? null } : null
 }
+/** 按组件和事件种类生成受限探针字段，不重新求值业务动态绑定。 */
 function probeFields(element: ElementNode, kind: 'click' | 'change', name: string): string {
   const fields = ['schemaVersion:2', 'source:"template"', `kind:${literal(kind)}`, `eventName:${literal(name)}`, `elementType:${literal(element.tag)}`]
   const names = { 'data-title': 'textValue', 'data-index': 'index', 'data-src': 'hyperlink', 'data-growing-ignore': 'ignored', 'data-growing-track': 'trackValue', 'data-growing-sensitive': 'sensitive' }
@@ -136,6 +146,7 @@ function probeFields(element: ElementNode, kind: 'click' | 'change', name: strin
   }
   return `{${fields.join(',')}}`
 }
+/** 跳过引号内字符定位开始标签末尾，供无监听器的链接追加探针。 */
 function openingEnd(element: ElementNode): number | null {
   let quote = ''
   for (let i = 0; i < element.loc.source.length; i++) {
@@ -146,6 +157,7 @@ function openingEnd(element: ElementNode): number | null {
   }
   return null
 }
+/** 遍历模板元素并收集可安全插桩的监听器替换及边界告警。 */
 function visit(nodes: readonly TemplateChildNode[], dispatcher: string, replacements: Replacement[], warnings: AutoTrackTransformWarning[]): void {
   for (const element of nodes) {
     if (element.type !== NodeTypes.ELEMENT) continue
@@ -155,7 +167,8 @@ function visit(nodes: readonly TemplateChildNode[], dispatcher: string, replacem
     let hasDynamic = false
     for (const prop of element.props) {
       if (prop.type !== NodeTypes.DIRECTIVE || prop.name !== 'on') continue
-      // An intentional exclusion is not a missed collection target. Keep syntax diagnostics.
+      // 明确排除采集的监听不属于漏采目标，但仍保留语法诊断。
+      /** 保留语法相关告警，对明确忽略的采集目标省去无意义诊断。 */
       const warn = (code: AutoTrackTransformWarning['code']): void => {
         if (!ignored || code === 'missing_handler') warnings.push({ code, offset: prop.loc.start.offset })
       }
@@ -186,10 +199,14 @@ function visit(nodes: readonly TemplateChildNode[], dispatcher: string, replacem
   }
 }
 
+/** 解析模板并应用探针替换；语法错误时保留原模板和诊断。 */
 export function transformAutoTrackTemplate(template: string, dispatcher = 'gioAutoTrack'): AutoTrackTemplateTransform {
   const warnings: AutoTrackTransformWarning[] = []
   let root
-  try { root = parse(template, { onError: (error) => { warnings.push({ code: 'template_parse_error', offset: error.loc?.start.offset ?? 0 }) } }) }
+  try { root = parse(template, {
+    /** 将模板解析器错误记录为带源码偏移的构建诊断。 */
+    onError: (error) => { warnings.push({ code: 'template_parse_error', offset: error.loc?.start.offset ?? 0 }) }
+  }) }
   catch { return { code: template, warnings: [{ code: 'template_parse_error', offset: 0 }], changed: false } }
   if (warnings.length > 0) return { code: template, warnings, changed: false }
   const replacements: Replacement[] = []
@@ -197,6 +214,7 @@ export function transformAutoTrackTemplate(template: string, dispatcher = 'gioAu
   return { code: apply(template, replacements), warnings, changed: replacements.length > 0 }
 }
 
+/** 处理完整 Vue SFC，选择无名称冲突的运行时导入并保持重复处理幂等。 */
 export function transformAutoTrackSfc(source: string, runtimeImport = 'gio-uniapp-autotracker/autotrack'): VueSfcTransform {
   const parsed = parseSfc(source)
   if (parsed.errors.length > 0) return { code: source, changed: false, warnings: parsed.errors.map((error) => ({ code: 'sfc_parse_error', offset: typeof error === 'object' && 'loc' in error ? error.loc?.start.offset ?? 0 : 0 })) }
@@ -206,8 +224,8 @@ export function transformAutoTrackSfc(source: string, runtimeImport = 'gio-uniap
   let existing: string | null = null
   let methodsInsertion: { offset: number; existing: boolean } | null = null
   let unsafeOptions = false
-  // Template aliases can also use escaped identifiers. Only the collision scan is
-  // decoded; business source and its offsets remain untouched.
+  // 模板别名也可能使用转义标识符，仅在名称冲突检查时解码。
+  // 业务源码及其偏移保持不变。
   const bindingSource = source.replace(/\\u(?:\{([a-f\d]{1,6})\}|([a-f\d]{4}))/gi, (escape, point: string | undefined, unit: string | undefined) => {
     const value = Number.parseInt(point ?? unit!, 16)
     return value <= 0x10ffff ? String.fromCodePoint(value) : escape
@@ -251,7 +269,7 @@ export function transformAutoTrackSfc(source: string, runtimeImport = 'gio-uniap
     const imported = `\n/* ${marker} */\nimport { dispatchAutoTrack as ${dispatcher} } from ${literal(runtimeImport)}\n`
     if (scriptSetup !== null) replacements.push({ start: scriptSetup.loc.start.offset, end: scriptSetup.loc.start.offset, value: imported })
     else if (script !== null && methodsInsertion !== null) {
-      // 直接向静态 methods 对象插入独立名称，不复制组件或提前读取业务 getter。
+      // 直接向静态 methods 对象插入独立名称，不复制组件或提前读取业务属性访问器。
       replacements.push({ start: script.loc.start.offset, end: script.loc.start.offset, value: imported })
       const offset = script.loc.start.offset + methodsInsertion.offset
       replacements.push({ start: offset, end: offset, value: methodsInsertion.existing ? `${dispatcher},` : `methods:{${dispatcher}},` })
@@ -260,13 +278,24 @@ export function transformAutoTrackSfc(source: string, runtimeImport = 'gio-uniap
   return { code: apply(source, replacements), warnings, changed: true }
 }
 
-export type UniAppAutoTrackViteContext = Readonly<{ warn?: (message: string) => void }>
-export type UniAppAutoTrackVitePlugin = Readonly<{ name: string; enforce: 'pre'; transform: (this: UniAppAutoTrackViteContext | void, source: string, id: string) => Readonly<{ code: string }> | null }>
+export type UniAppAutoTrackViteContext = Readonly<{
+  /** 将带文件与偏移信息的采集边界诊断交给宿主构建器。 */
+  warn?: (message: string) => void
+}>
+export type UniAppAutoTrackVitePlugin = Readonly<{
+  name: string;
+  enforce: 'pre';
+  /** 返回实际改写源码；不支持或无需改写时返回 null。 */
+  transform: (this: UniAppAutoTrackViteContext | void, source: string, id: string) => Readonly<{ code: string }> | null
+}>
 export type UniAppAutoTrackViteOptions = Readonly<{ enabled?: boolean; runtimeImport?: string }>
+/** 创建在 uni 编译器前执行的 Vite 插件，支持关闭插桩和指定探针导入路径。 */
 export function gioUniappAutoTrack(options?: string | UniAppAutoTrackViteOptions): UniAppAutoTrackVitePlugin {
   const runtimeImport = typeof options === 'string' ? options : options?.runtimeImport ?? 'gio-uniapp-autotracker/autotrack'
   return {
-    name: 'gio-uniapp-autotrack', enforce: 'pre',
+    name: 'gio-uniapp-autotrack',
+    enforce: 'pre',
+    /** 只处理支持的 Vue 文件，透传采集边界告警并返回实际改写结果。 */
     transform(source, id) {
       if (typeof options !== 'string' && options?.enabled === false) return null
       if (id.endsWith('.nvue')) { this?.warn?.(`[gio-uniapp-autotrack] ${id}:0 .nvue_not_instrumented`); return null }

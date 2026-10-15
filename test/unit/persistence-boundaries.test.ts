@@ -7,6 +7,7 @@ import { SessionPersistence } from '../../src/core/storage/index.js'
 import { QueuePersistence } from '../../src/core/storage/index.js'
 import { EventQueue } from '../../src/core/queue.js'
 
+/** 记录分区读写和删除操作，确认各类缓存故障不会越界清理。 */
 function backend(read: StorageRead) {
   const write = vi.fn<StoragePort['write']>().mockResolvedValue({ kind: 'ok' })
   const remove = vi.fn<StoragePort['remove']>().mockResolvedValue({ kind: 'ok' })

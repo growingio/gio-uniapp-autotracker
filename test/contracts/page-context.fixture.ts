@@ -1,4 +1,4 @@
-/** 阶段 0 的页面与入口数据边界；阶段 3 的 runtime 以此实现 page store。 */
+/** 阶段 0 的页面与入口数据边界；阶段 3 的运行时以此实现页面状态存储。 */
 export type PageContextEventType = 'PAGE' | 'CUSTOM' | 'VIEW_CLICK' | 'VIEW_CHANGE' | 'APP_CLOSED'
 
 export type PageContextSnapshot = Readonly<{

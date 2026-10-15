@@ -20,17 +20,21 @@
 
 <script>
 export default {
+  /** 初始化手动事件演示的结果提示。 */
   data() {
     return { result: '尚未操作。' }
   },
   methods: {
+    /** 展示 SDK 命令接纳结果；本地接纳不代表采集服务已收到。 */
     showResult(name, ok) {
       this.result = `${name}：${ok ? '已入队' : '未入队（检查采集开关或参数）'}`
     },
+    /** 发送包含字符串、数值和布尔属性的标准业务事件。 */
     trackProduct() {
       const ok = gdp('track', 'product_exposure', { sku: 'demo-sku-001', category: 'showcase', price: 99, available: true })
       this.showResult('product_exposure', ok)
     },
+    /** 提交混合合法与非法属性，验证属性归一化和剔除边界。 */
     trackBoundary() {
       const ok = gdp('track', 'demo_attribute_boundary', {
         kept: 'yes', labels: ['demo', true, 1], nested: { mustBeDiscarded: true }, nonFinite: Number.NaN,
@@ -39,10 +43,12 @@ export default {
         ? '事件已入队：collector 中应只保留 kept 和 labels，嵌套对象与 NaN 会被剔除。'
         : '未入队：先开启采集开关。'
     },
+    /** 提交空事件名，验证整条非法 CUSTOM 被拒绝。 */
     trackInvalid() {
       const ok = gdp('track', '', { ignored: true })
       this.showResult('track(空事件名)', ok)
     },
+    /** 调用未知命令，验证防御性入口返回失败。 */
     unknownCommand() { this.showResult('未知 gdp 命令', gdp('not_a_public_command')) },
   },
 }

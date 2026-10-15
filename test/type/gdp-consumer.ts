@@ -47,13 +47,13 @@ command('setOptions', { dataCollect: true })
 command('setLocation', 30.2741, 120.1551)
 command('clearLocation')
 
-// @ts-expect-error unknown commands are not customer APIs.
+// @ts-expect-error 未知命令不属于客户 API。
 command('getTracker')
-// @ts-expect-error nested objects cannot be serialized as attributes.
+// @ts-expect-error 嵌套对象不能作为事件属性。
 command('track', 'purchase_completed', { order: { id: 'order-1' } })
-// @ts-expect-error dataCollect must be a boolean and is the only mutable option.
+// @ts-expect-error dataCollect 必须为布尔值，且是唯一可变选项。
 command('setOptions', { idMapping: true })
-// @ts-expect-error location requires numeric inputs at the public API boundary.
+// @ts-expect-error 公开位置接口只接受数值参数。
 command('setLocation', '30.2741', 120.1551)
-// @ts-expect-error init always requires the SDK-owned Vue App reference.
+// @ts-expect-error init 必须接收 SDK 使用的 Vue 应用引用。
 command('init', 'account-id', 'data-source-id', { dataCollect: true })

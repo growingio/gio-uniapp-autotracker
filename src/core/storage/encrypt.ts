@@ -1,10 +1,11 @@
 export const GIO_IDENTITY_CIPHER_PREFIX = 'gioenc-v3-'
 export const GIO_IDENTITY_CIPHER = 'xor-utf8-v1'
 
-// This stable internal seed is part of the cross-platform codec contract, not a public option.
+// 稳定内部种子属于跨端身份编码契约，不是公开配置项。
 const IDENTITY_KEY_SEED = 'gio-identity-xor-utf8-v1:'
 const BASE64_URL_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
 
+/** 将合法 Unicode 字符串编码为 UTF-8；未配对代理项返回 null。 */
 function utf8Encode(value: string): Uint8Array | null {
   const bytes: number[] = []
   for (let index = 0; index < value.length; index += 1) {
@@ -26,6 +27,7 @@ function utf8Encode(value: string): Uint8Array | null {
   return Uint8Array.from(bytes)
 }
 
+/** 严格解码 UTF-8 字节，拒绝截断、过长编码及非法码点。 */
 function utf8Decode(bytes: Uint8Array): string | null {
   const chunks: string[] = []
   for (let index = 0; index < bytes.length;) {
@@ -54,6 +56,7 @@ function utf8Decode(bytes: Uint8Array): string | null {
   return chunks.join('')
 }
 
+/** 将字节编码为无填充的 Base64URL，避免依赖浏览器或 Node 编码 API。 */
 function base64UrlEncode(bytes: Uint8Array): string {
   let output = ''
   for (let index = 0; index < bytes.length; index += 3) {
@@ -68,6 +71,7 @@ function base64UrlEncode(bytes: Uint8Array): string {
   return output
 }
 
+/** 校验并解码规范 Base64URL，非法字符、长度或尾部位返回 null。 */
 function base64UrlDecode(value: string): Uint8Array | null {
   if (!/^[A-Za-z0-9_-]*$/.test(value) || value.length % 4 === 1) return null
   const bytes: number[] = []
@@ -85,30 +89,32 @@ function base64UrlDecode(value: string): Uint8Array | null {
   return base64UrlEncode(decoded) === value ? decoded : null
 }
 
+/** 按数据源生成稳定的字节掩码，使不同数据源的身份记录互相隔离。 */
 function keyFor(dataSourceId: string): Uint8Array {
   if (dataSourceId.trim().length === 0) throw new Error('identity_cipher_key_invalid')
   const source = utf8Encode(dataSourceId)
   const material = utf8Encode(`${IDENTITY_KEY_SEED}${dataSourceId}`)
   if (source === null || source.length === 0 || material === null || material.length === 0) throw new Error('identity_cipher_key_invalid')
 
-  // Fold every source byte into every repeating key byte. This keeps a short visitor ID
-  // from sharing a usable key prefix when two data sources differ only near the end.
+  // 将数据源的每个字节混入循环掩码的每个字节。
+  // 避免仅尾部不同的数据源为短设备标识产生相同的可用掩码前缀。
   const sourceFold = source.reduce((fold, byte, index) => fold ^ ((byte + index) & 0xff), 0)
   return Uint8Array.from(material, (byte, index) => byte ^ source[index % source.length]! ^ sourceFold)
 }
 
+/** 对字节应用循环 XOR；同一掩码再次处理可恢复原文，不作为强密码学加密。 */
 function xor(value: Uint8Array, key: Uint8Array): Uint8Array {
   return Uint8Array.from(value, (byte, index) => byte ^ key[index % key.length]!)
 }
 
-/** Uses only local UTF-8/Base64URL routines so every host writes identical ciphertext. */
+/** 仅使用本地 UTF-8 和 Base64URL 实现，保证各宿主生成一致的身份编码。 */
 export function encryptIdentityValue(value: string, dataSourceId: string): string {
   const plain = utf8Encode(value)
   if (plain === null) throw new Error('identity_cipher_invalid_utf16')
   return `${GIO_IDENTITY_CIPHER_PREFIX}${base64UrlEncode(xor(plain, keyFor(dataSourceId)))}`
 }
 
-/** Returns null for prefix, Base64URL, UTF-8, or key validation failures. */
+/** 前缀、Base64URL、UTF-8 或掩码校验失败时返回 null。 */
 export function decryptIdentityValue(value: unknown, dataSourceId: string): string | null {
   if (typeof value !== 'string' || !value.startsWith(GIO_IDENTITY_CIPHER_PREFIX)) return null
   let key: Uint8Array

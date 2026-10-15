@@ -8,5 +8,5 @@ gdp('registerPlugins', [{ name: 'gioEventAutoTracking' }])
 gdp('init', 'account-id', 'data-source-id', { uniVue: app, dataCollect: false })
 gdp('track', 'page_opened', { source: 'global-page' })
 
-// @ts-expect-error the SDK declaration must reject typos in global page calls too.
+// @ts-expect-error 全局页面调用也必须拒绝错误命令名称。
 gdp('trakc', 'page_opened')

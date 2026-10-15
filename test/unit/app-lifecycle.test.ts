@@ -20,6 +20,7 @@ const system: AppSystemContext = {
   deviceType: 'PHONE', appVersion: '1.0.0', language: 'en-US', sdkVersion: '0.1.0',
 }
 
+/** 装配可控制时间、采集开关和刷新顺序的 App 生命周期测试对象。 */
 function createLifecycle(initialCollection = true, initialSession: Readonly<{ sessionId: string; lastCloseTime: number | null }> | null = null,
   overrides: Partial<AppLifecycleDependencies> = {}) {
   let now = 0

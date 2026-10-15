@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { SessionManager } from '../../src/core/userStore.js'
 
+/** 顺序生成确定的会话标识，便于区分续用与新建会话。 */
 function ids(...values: string[]): () => string {
   let index = 0
   return () => values[index++] ?? 'unexpected-id'
