@@ -40,6 +40,51 @@ const collectors: MockCollector[] = []
 afterEach(async () => { vi.unstubAllGlobals(); await Promise.all(collectors.splice(0).map((collector) => collector.close())) })
 
 describe('SFC to mock collector pipeline', () => {
+  it('keeps idless bubbling clicks, consent boundaries and removed value consent correct through compiled listeners and wire events', async () => {
+    const received: Readonly<Record<string, unknown>>[] = []
+    let now = 100
+    let sessionNumber = 0
+    const tracker = new TrackerRuntime({
+      ...trackerDependencies(), autoTrackProfile: testAutoTrackProfile,
+      clock: { now: () => now }, sessionIdFactory: () => `session-${++sessionNumber}`,
+      upload: {
+        runtime: { now: () => now, random: () => 0, setTimeout, clearTimeout: handle => clearTimeout(handle as ReturnType<typeof setTimeout>) },
+        transport: { dispatch: (request, done) => { received.push(...JSON.parse(request.body)); done({ kind: 'success', status: 204 }) } },
+      },
+    })
+    await show(tracker)
+    installAutoTrackDispatcher(tracker)
+    const business = vi.fn(event => event)
+    const fixture = mountAutoTrackSfc(`<script setup>import { business } from 'fixture'; const attributes = { 'data-growing-track': null }</script><template><view @tap="business($event)"><button @tap="business($event)"/></view><switch data-growing-track v-bind="attributes" @change="business($event)"/></template>`, (probe, event) => dispatchAutoTrack(probe as AutoTrackCall, event), { fixture: { business } })
+    try {
+      const child = { dataset: {} }
+      const parent = { dataset: {} }
+      const native = { type: 'tap', timeStamp: 100, currentTarget: child, target: child }
+      fixture.fire(1, 'onTap', native)
+      fixture.fire(1, 'onTap', native)
+      native.currentTarget = parent
+      fixture.fire(0, 'onTap', native)
+      expect(received.filter(event => event.eventType === 'VIEW_CLICK')).toHaveLength(2)
+      tracker.setDataCollect(false)
+      now = 1_000
+      tracker.setDataCollect(true)
+      // A wrapper in the old timestamp window still belongs to the replacement PAGE.
+      fixture.fire(0, 'onTap', { ...native, timeStamp: 101 })
+      const read = vi.fn(() => ({ value: true }))
+      fixture.fire(0, 'onChange', { currentTarget: { dataset: {} }, get detail() { return read() } })
+      expect(read).not.toHaveBeenCalled()
+      const views = received.filter(event => typeof event.eventType === 'string' && event.eventType.startsWith('VIEW_'))
+      expect(views).toMatchObject([
+        { eventType: 'VIEW_CLICK', xpath: '#business', pageShowTimestamp: 100, sessionId: 'session-1' },
+        { eventType: 'VIEW_CLICK', xpath: '#business', pageShowTimestamp: 100, sessionId: 'session-1' },
+        { eventType: 'VIEW_CLICK', xpath: '#business', pageShowTimestamp: 1_000, sessionId: 'session-2' },
+        { eventType: 'VIEW_CHANGE', xpath: '#business', pageShowTimestamp: 1_000, sessionId: 'session-2' },
+      ])
+      expect(views.at(-1)).not.toHaveProperty('textValue')
+      expect(views.every(event => !('targetId' in event) && !('eventName' in event) && !('source' in event))).toBe(true)
+      expect(business).toHaveBeenCalledTimes(5)
+    } finally { fixture.unmount() }
+  })
   it('executes compiled listeners through the production dispatcher, protocol and HTTP transport', async () => {
     const received: Readonly<Record<string, unknown>>[] = []
     const collector = await createMockCollector({ onAcceptedEvents: (events) => received.push(...events) })

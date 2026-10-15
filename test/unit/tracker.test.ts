@@ -48,6 +48,25 @@ function createTracker(dataCollect = true, autoTracking = false, debug = false, 
 }
 
 describe('TrackerRuntime', () => {
+  it('starts fresh click deduplication when consent creates a replacement PAGE', async () => {
+    const { tracker, setNow } = createTracker(true, true)
+    tracker.onAppShow({ path: '/home', query: '' })
+    tracker.onPageLoad({ instanceId: 'home', route: 'pages/home', query: '', referralPage: null })
+    tracker.onPageShow('home', 'Home')
+    await tracker.whenReady()
+    const probe = { schemaVersion: 2, source: 'template', kind: 'click', eventName: 'save' } as const
+    const event = { type: 'tap', timeStamp: 100, currentTarget: { id: 'buy' } }
+    expect(tracker.autoTrack(probe, event)).toBe(true)
+    expect(tracker.setDataCollect(false)).toBe(true)
+    setNow(1_000)
+    expect(tracker.setDataCollect(true)).toBe(true)
+    expect(tracker.autoTrack(probe, { ...event, timeStamp: 101 })).toBe(true)
+    expect(tracker.autoTrack(probe, event)).toBe(false)
+    expect(tracker.queuedEvents().filter(event => event.eventType === 'VIEW_CLICK')).toMatchObject([
+      { sessionId: 'session-1', pageShowTimestamp: 100 },
+      { sessionId: 'session-2', pageShowTimestamp: 1_000 },
+    ])
+  })
   it('App 事件在调用时立即发送并输出事件日志，不等待聚合定时器', async () => {
     const logs: string[] = []
     const requests: ProtocolEvent[][] = []

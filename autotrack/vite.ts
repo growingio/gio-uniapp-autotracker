@@ -2,7 +2,7 @@ import { NodeTypes, parse, type ElementNode, type TemplateChildNode } from '@vue
 import { parse as parseSfc } from '@vue/compiler-sfc'
 import { parse as parseScript } from '@babel/parser'
 import { CHANGE_ELEMENTS, TEMPLATE_ELEMENTS } from './contract.js'
-import { containsProbe, expression, metadataExpression, node, rewriteHandler } from './vite-handler.js'
+import { containsProbe, expression, metadataExpression, node, rewriteHandler, walk } from './vite-handler.js'
 
 export type AutoTrackTransformWarning = Readonly<{
   code: 'sfc_parse_error' | 'template_parse_error' | 'dynamic_event' | 'missing_handler' | 'event_modifiers' | 'custom_component' | 'unsupported_event' | 'complex_handler' | 'complex_component_options' | 'event_name_fallback' | '.nvue_not_instrumented'
@@ -13,6 +13,7 @@ export type VueSfcTransform = AutoTrackTemplateTransform
 
 type Replacement = Readonly<{ start: number; end: number; value: string }>
 const inputEvents = ['change', 'blur', 'confirm']
+const textRenderingDirectives = new Set(['for', 'if', 'else-if', 'else', 'show', 'text', 'html'])
 const marker = '#__GIO_AUTOTRACK_V2__'
 function literal(value: string): string { return JSON.stringify(value) }
 function attribute(value: string): string { return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;') }
@@ -20,7 +21,13 @@ function apply(source: string, replacements: Replacement[]): string {
   for (const replacement of replacements.sort((a, b) => b.start - a.start)) source = source.slice(0, replacement.start) + replacement.value + source.slice(replacement.end)
   return source
 }
-function bound(element: ElementNode, name: string): string | null {
+function bound(element: ElementNode, name: string, preserveExclusion = false): string | null {
+  // A spread/dynamic key can remove or replace a literal binding at render time.
+  // Its former value must never become fallback consent or stale event metadata.
+  // Positive static ignore/sensitive markers remain conservative exclusions.
+  if (!preserveExclusion && element.props.some((prop) => prop.type === NodeTypes.DIRECTIVE && prop.name === 'bind'
+    && (prop.arg === undefined || prop.arg.type !== NodeTypes.SIMPLE_EXPRESSION || !prop.arg.isStatic
+      || (prop.arg.content === name && prop.modifiers.length > 0)))) return null
   for (const prop of element.props) {
     if (prop.type === NodeTypes.ATTRIBUTE && prop.name === name) return literal(prop.value?.content ?? '')
     if (prop.type === NodeTypes.DIRECTIVE && prop.name === 'bind' && prop.arg?.type === NodeTypes.SIMPLE_EXPRESSION
@@ -57,6 +64,9 @@ function sensitive(element: ElementNode): boolean {
       || (prop.name === 'password' && prop.value?.content !== 'false')))
 }
 function staticText(element: ElementNode): string | null {
+  if (!['view', 'text'].includes(element.tag)) return null
+  if (element.props.some((prop) => prop.type === NodeTypes.DIRECTIVE
+    && textRenderingDirectives.has(prop.name))) return null
   let value = ''
   for (const child of element.children) {
     if (child.type === NodeTypes.TEXT) value += child.content
@@ -72,11 +82,13 @@ function pickerColumns(element: ElementNode): { range: string; key: string | nul
   const keys: (string | null)[] = []
   for (const column of element.children) {
     if (column.type === NodeTypes.TEXT && column.content.trim() === '' || column.type === NodeTypes.COMMENT) continue
-    if (column.type !== NodeTypes.ELEMENT || column.tag !== 'picker-view-column' || column.props.some((prop) => prop.type === NodeTypes.DIRECTIVE && ['for', 'if'].includes(prop.name))) return null
+    if (column.type !== NodeTypes.ELEMENT || column.tag !== 'picker-view-column' || column.props.some((prop) => prop.type === NodeTypes.DIRECTIVE && textRenderingDirectives.has(prop.name))) return null
     const options = column.children.filter((child) => child.type !== NodeTypes.COMMENT && !(child.type === NodeTypes.TEXT && child.content.trim() === ''))
     const option = options[0]
+    if (option?.type === NodeTypes.ELEMENT && !['view', 'text'].includes(option.tag)) return null
     const loop = option?.type === NodeTypes.ELEMENT ? option.props.find((prop) => prop.type === NodeTypes.DIRECTIVE && prop.name === 'for') : undefined
     if (options.length === 1 && option?.type === NodeTypes.ELEMENT && loop?.type === NodeTypes.DIRECTIVE && loop.exp?.type === NodeTypes.SIMPLE_EXPRESSION) {
+      if (option.props.some((prop) => prop.type === NodeTypes.DIRECTIVE && prop.name !== 'for' && textRenderingDirectives.has(prop.name))) return null
       const match = /^\s*\(?\s*([\w$]+)(?:\s*,\s*[\w$]+)?\s*\)?\s+(?:in|of)\s+([\s\S]+)$/.exec(loop.exp.content)
       const range = match?.[2] === undefined ? null : metadataExpression(match[2])
       const content = option.children.filter((child) => !(child.type === NodeTypes.TEXT && child.content.trim() === ''))
@@ -104,7 +116,7 @@ function probeFields(element: ElementNode, kind: 'click' | 'change', name: strin
   const names = { 'data-title': 'textValue', 'data-index': 'index', 'data-src': 'hyperlink', 'data-growing-ignore': 'ignored', 'data-growing-track': 'trackValue', 'data-growing-sensitive': 'sensitive' }
   for (const [prop, field] of Object.entries(names)) {
     if (field === 'sensitive' && sensitive(element)) continue
-    const value = bound(element, prop)
+    const value = bound(element, prop, field === 'ignored' || field === 'sensitive')
     if (value !== null) fields.push(`${field}:${value}`)
   }
   if (sensitive(element)) fields.push('sensitive:true')
@@ -194,10 +206,21 @@ export function transformAutoTrackSfc(source: string, runtimeImport = 'gio-uniap
   let existing: string | null = null
   let methodsInsertion: { offset: number; existing: boolean } | null = null
   let unsafeOptions = false
+  // Template aliases can also use escaped identifiers. Only the collision scan is
+  // decoded; business source and its offsets remain untouched.
+  const bindingSource = source.replace(/\\u(?:\{([a-f\d]{1,6})\}|([a-f\d]{4}))/gi, (escape, point: string | undefined, unit: string | undefined) => {
+    const value = Number.parseInt(point ?? unit!, 16)
+    return value <= 0x10ffff ? String.fromCodePoint(value) : escape
+  })
+  const names = new Set(bindingSource.match(/[A-Za-z_$][\w$]*/g) ?? [])
   try {
     for (const block of [scriptSetup, script]) {
       if (block === null) continue
       const ast = parseScript(block.content, { sourceType: 'module', plugins: ['typescript'] })
+      walk(ast.program, (entry) => {
+        if (entry.type === 'Identifier' && typeof entry.name === 'string') names.add(entry.name)
+        if (entry.type === 'StringLiteral' && typeof entry.value === 'string') names.add(entry.value)
+      })
       for (const entry of ast.program.body) {
         if (block === script && scriptSetup === null && entry.type === 'ExportDefaultDeclaration') {
           const options = entry.declaration
@@ -216,7 +239,6 @@ export function transformAutoTrackSfc(source: string, runtimeImport = 'gio-uniap
       }
     }
   } catch { return { code: source, warnings: [{ code: 'sfc_parse_error', offset: scriptSetup?.loc.start.offset ?? script?.loc.start.offset ?? 0 }], changed: false } }
-  const names = new Set(source.match(/[A-Za-z_$][\w$]*/g) ?? [])
   let dispatcher = 'gioAutoTrack'
   for (let suffix = 1; [...names].some((name) => name.startsWith(dispatcher)); suffix++) dispatcher = `gioAutoTrack${suffix}`
   dispatcher = existing ?? dispatcher

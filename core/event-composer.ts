@@ -88,7 +88,7 @@ export class EventComposer {
     const preview = buildAppEvent(input.eventType, { ...base, eventSequenceId: 1 })
     if (!preview.ok) return preview
 
-    const eventSequenceId = this.sequence.next(input.eventType)
+    const eventSequenceId = this.sequence.peek(input.eventType)
     const built = eventSequenceId === null
       ? preview
       : buildAppEvent(input.eventType, { ...base, eventSequenceId })
@@ -96,6 +96,7 @@ export class EventComposer {
 
     const enqueued = this.queue.enqueue(built.event)
     if (!enqueued.ok) return enqueued
+    if (eventSequenceId !== null) this.sequence.next(input.eventType)
     return { ok: true, event: built.event, requestId: enqueued.requestId }
   }
 

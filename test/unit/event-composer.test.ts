@@ -6,7 +6,7 @@ import { EventSequence } from '../../core/event-sequence.js'
 import type { Identity } from '../../core/identity.js'
 import { LocationState } from '../../core/location-state.js'
 import type { AppSystemContext } from '../../core/ports.js'
-import { EventQueue } from '../../core/queue.js'
+import { EventQueue, MAX_QUEUE_ITEMS, MAX_EVENT_BYTES } from '../../core/queue.js'
 import { SessionManager } from '../../core/session.js'
 
 function fixtureConfig() {
@@ -45,6 +45,23 @@ function createComposer(overrides: Partial<{ clock: () => number; identity: () =
 }
 
 describe('EventComposer', () => {
+  it('does not consume a sequence when the queue is full and continues after it drains', () => {
+    const { composer, queue, sequence } = createComposer()
+    for (let index = 0; index < MAX_QUEUE_ITEMS; index++) expect(composer.compose({ eventType: 'VISIT' }).ok).toBe(true)
+    expect(composer.compose({ eventType: 'VISIT' })).toEqual({ ok: false, code: 'queue_full' })
+    expect(sequence.current().eventSequenceId).toBe(MAX_QUEUE_ITEMS)
+    queue.remove(queue.snapshot().map(entry => entry.requestId))
+    expect(composer.compose({ eventType: 'VISIT' })).toMatchObject({ ok: true, event: { eventSequenceId: MAX_QUEUE_ITEMS + 1 } })
+  })
+  it('does not consume a sequence when an automatically tracked event exceeds the queue byte limit', () => {
+    const { composer, queue, sequence } = createComposer()
+    expect(composer.compose({ eventType: 'VIEW_CLICK', fields: { xpath: 'x'.repeat(MAX_EVENT_BYTES), pageShowTimestamp: 100 } }))
+      .toEqual({ ok: false, code: 'event_too_large' })
+    expect(queue.snapshot()).toEqual([])
+    expect(sequence.current().eventSequenceId).toBe(0)
+    expect(composer.compose({ eventType: 'VIEW_CLICK', fields: { xpath: '#save', pageShowTimestamp: 100 } }))
+      .toMatchObject({ ok: true, event: { eventSequenceId: 1 } })
+  })
   it('系统时钟抛错时拒绝事件，不入队也不消耗序列号', () => {
     const { composer, queue, sequence } = createComposer({ clock: () => { throw new Error('clock failed') } })
     expect(composer.compose({ eventType: 'VISIT' })).toEqual({ ok: false, code: 'invalid_timestamp' })

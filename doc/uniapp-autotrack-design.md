@@ -165,7 +165,7 @@ Options API、普通 `setup()` 与 `<script setup>` 的最终事件口径相同�
 
 普通 Options / setup 组件仅向可静态确认的 methods 字面量插入独立名称，不复制组件对象、不改写 setup 的返回值。导出变量、工厂调用、动态 methods、顶层 spread / 计算选项等输出 `complex_component_options` 并保持整份 SFC 原样。
 
-注入 import 时必须根据 SFC 的 script、script setup 和 template bindings 选择不冲突的局部别名，不能固定假设 `__gioAutoTrack` 未被业务占用。幂等判断也必须识别 SDK 自己生成的 import/调用标记，不能用全文 `includes()`，避免业务注释或字符串导致整页漏插桩。
+注入 import 时必须根据 SFC 的 script、script setup 和 template bindings 选择不冲突的局部别名，不能固定假设 `__gioAutoTrack` 未被业务占用。名称判断包含 AST 解码后的 Identifier / 字符串方法键，以及模板中 Unicode 转义的循环或 slot 别名；只用于冲突判断，不改写业务源码。幂等判断也必须识别 SDK 自己生成的 import/调用标记，不能用全文 `includes()`，避免业务注释或字符串导致整页漏插桩。
 
 无业务 click 的 `uni-link` 由 Vite 额外插入只采集 handler，事件名固定为 `openURL`。同时将静态 `href` 或动态 `:href` 映射为 `data-src` 等价值，使最终 `VIEW_CLICK.hyperlink` 与实际链接一致；不把未序列化对象作为 metadata 传入。
 
@@ -234,7 +234,7 @@ Options API、普通 `setup()` 与 `<script setup>` 的最终事件口径相同�
 - `xpath` 的 id、`data-title`、`data-index`、`data-src` 使用 `primaryTarget = currentTarget || target`；`currentTarget` 存在但没有 id 时不能回退 `target.id`；
 - `data-growing-ignore` 和 `data-growing-sensitive` 同时检查 `currentTarget.dataset` 与原始 `target.dataset`，任意一处命中就拒绝；
 - `detail.source === 'autoplay'` 时，仅检查原始 `target.dataset.growingTrack` 是否显式放行；
-- 模板中的静态或动态 metadata 只作为宿主 event 对应字段缺失时的受限补充，动态 `id`、`data-title`、`data-index`、`data-src` 以触发瞬间值为准。
+- 模板中的静态 metadata 只作为宿主 event 对应字段缺失时的受限补充，动态 `id`、`data-title`、`data-index`、`data-src` 以触发瞬间值为准。存在 `v-bind` 展开、动态属性名或对应绑定修饰符时，不复制可能被覆盖的授权、文案、链接、index 或 picker range；静态 ignore/sensitive 仍保守拒绝整个 probe。
 
 ### 5.2 字段与隐私规则
 
@@ -268,6 +268,8 @@ Options API、普通 `setup()` 与 `<script setup>` 的最终事件口径相同�
 
 每类组件必须有独立 normalizer，不能用真值判断读取值。空字符串或空数组可以使最终 `textValue` 为空并被 Protocol 清理，但不能因此丢弃整条 `VIEW_CHANGE`；`0` 和 `false` 必须分别保留为 `"0"`、`"false"`。某端无法证明事件结构时，该 `elementType` 在对应 capability profile 中保持禁用。
 
+picker-view 只复制固定列中能静态确认的 view/text 文字。列或嵌套文字存在循环、条件显示、`v-text` / `v-html`、自定义组件，或字面量 v-for 选项同时带条件显示时，使用规范下标回退，不拼接未渲染分支或不能代表组件实际显示的 slot 文字。简单字面量 v-for 仍可提取已确认的选项文案。自动采集文案以 Unicode 码点计数，最多保留 100 个字符，不截断 emoji 的代理对。hyperlink 使用完整目标地址，不复用文案长度限制；超大事件仍受队列字节上限保护。
+
 ### 5.4 去重规则
 
 去重发生在隐私判断、字段归一化和最终 `xpath` 生成之后，分为两层。
@@ -275,18 +277,18 @@ Options API、普通 `setup()` 与 `<script setup>` 的最终事件口径相同�
 第一层使用 `WeakMap<nativeEvent, Set<dedupeKey>>`，只抑制同一个事件对象上的相同 probe：
 
 ```text
-kind + xpath + textValue + index + hyperlink
+kind + xpath + textValue + index + hyperlink + 无 id 时的绑定目标身份
 ```
 
 第二层覆盖宿主为同一次交互创建不同 JS 包装对象的情况。每个 tracker 只保存当前 shown page 的最近一条有效事件快照：
 
 ```text
-pageKey + nativeEvent.type + kind + xpath + textValue + index + hyperlink
+pageKey + nativeEvent.type + kind + xpath + textValue + index + hyperlink + 无 id 时的绑定目标身份
 ```
 
-仅当两条事件的键完全相同、`timeStamp` 都是有限正数且绝对差小于 `10ms` 时判重。`timeStamp` 为 `0`、缺失、NaN 或非有限数时跳过第二层，不能用零值把后续事件永久吞掉。页面切换时清空该快照；不建立跨页面或只按事件类型判断的全局时间窗。
+仅当两条事件的键完全相同、`timeStamp` 都是有限正数且绝对差小于 `10ms` 时判重。`timeStamp` 为 `0`、缺失、NaN 或非有限数时跳过第二层，不能用零值把后续事件永久吞掉。页面切换、重新显示和恢复采集补发 PAGE 时清空去重状态；不建立跨页面或只按事件类型判断的全局时间窗。
 
-同一个 probe 被重复执行时只采集一次；父子元素因 `currentTarget` 不同而产生不同 xpath 时各自可采集；不同值、index、title/link 或事件类型的连续操作不合并。input / textarea 同时声明 `change`、`blur`、`confirm` 时仍由 Vite 只选择一个完成事件插针，不依赖运行时跨类型猜测。swiper autoplay 必须先按上一节规则过滤，再进入去重。
+同一个 probe 被重复执行时只采集一次；父子元素绑定的目标不同，即使无 id、同 handler 且文案相同，也各自可采集。无 id 时仅在 WeakMap 中为 `currentTarget || target` 分配内部身份；没有目标则使用事件对象身份，无法确认同一目标的独立包装不合并。目标对象只作为弱键，内部身份不进入日志、队列或协议，`xpath` 仍为 `#handlerName`。不同值、index、title/link 或事件类型的连续操作不合并。input / textarea 同时声明 `change`、`blur`、`confirm` 时仍由 Vite 只选择一个完成事件插针，不依赖运行时跨类型猜测。swiper autoplay 必须先按上一节规则过滤，再进入去重。
 
 ## 6. tabBar 与页面上下文
 

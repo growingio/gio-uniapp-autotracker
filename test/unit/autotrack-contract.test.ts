@@ -5,6 +5,20 @@ const click = { schemaVersion: 2, source: 'template', kind: 'click', eventName: 
 const change = { ...click, kind: 'change', elementType: 'input', trackValue: true } as const
 
 describe('schema v2 normalization', () => {
+  it.each(['template', 'tabbar'])('preserves the complete %s hyperlink beyond the display-text limit', (source) => {
+    const hyperlink = `https://example.com/detail?return=${'a'.repeat(140)}&item=last`
+    const probe = source === 'template' ? { ...click, hyperlink }
+      : { schemaVersion: 2, source: 'tabbar', kind: 'click', xpath: '#onTabItemTap', index: 1, hyperlink }
+    expect(normalizeAutoTrackCall(probe)).toMatchObject({ hyperlink })
+    expect(normalizeAutoTrackCall(click, { currentTarget: { dataset: { src: hyperlink } } })).toMatchObject({ hyperlink })
+  })
+  it.each(['click', 'change'] as const)('keeps complete Unicode characters at the %s text limit', (kind) => {
+    for (const [value, expected] of [[`${'a'.repeat(99)}😀tail`, `${'a'.repeat(99)}😀`], ['😀'.repeat(101), '😀'.repeat(100)]]) {
+      const probe = kind === 'click' ? { ...click, textValue: value } : change
+      const event = kind === 'click' ? {} : { detail: { value } }
+      expect(normalizeAutoTrackCall(probe, event)?.textValue).toBe(expected)
+    }
+  })
   it.each([
     [{ currentTarget: { id: 'buy' }, target: { id: 'child' } }, 'buy#submitOrder'],
     [{ currentTarget: {}, target: { id: 'child' } }, '#submitOrder'],

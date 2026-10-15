@@ -12,8 +12,19 @@ function scalar(value: unknown): value is string | number | boolean {
   return typeof value === 'string' || typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value))
 }
 function optionalScalar(value: unknown): boolean { return value == null || scalar(value) }
+function scalarText(value: unknown): string | null {
+  return scalar(value) ? String(value).replace(/[\u0000-\u001F\u007F]/g, ' ').trim() : null
+}
 function text(value: unknown): string | null {
-  return scalar(value) ? String(value).replace(/[\u0000-\u001F\u007F]/g, ' ').trim().slice(0, 100) : null
+  const source = scalarText(value)
+  if (source === null) return null
+  let result = ''
+  let length = 0
+  for (const character of source) {
+    result += character
+    if (++length === 100) break
+  }
+  return result
 }
 export function enabledMarker(value: unknown): boolean { return value === true || value === '' || value === 'true' || value === 1 || value === '1' }
 function ownValue(value: Readonly<Record<string, unknown>>, key: string): unknown {
@@ -122,7 +133,7 @@ export function normalizeAutoTrackCall(value: unknown, nativeEvent?: unknown): N
       if (Object.keys(probe).some((key) => !tabFields.has(key)) || probe.kind !== 'click' || probe.xpath !== '#onTabItemTap') return null
       const at = index(probe.index, 1)
       if (at === null || typeof probe.index !== 'number' || !optionalScalar(probe.textValue) || !optionalScalar(probe.hyperlink)) return null
-      return { kind: 'click', xpath: '#onTabItemTap', index: at, textValue: text(probe.textValue), hyperlink: text(probe.hyperlink) }
+      return { kind: 'click', xpath: '#onTabItemTap', index: at, textValue: text(probe.textValue), hyperlink: scalarText(probe.hyperlink) }
     }
     if (probe.source !== 'template' || Object.keys(probe).some((key) => !templateFields.has(key))
       || (probe.kind !== 'click' && probe.kind !== 'change') || typeof probe.eventName !== 'string' || probe.eventName.trim() === '') return null
@@ -155,7 +166,7 @@ export function normalizeAutoTrackCall(value: unknown, nativeEvent?: unknown): N
       const rawIndex = metadata(dataset, 'index', probe.index)
       const link = metadata(dataset, 'src', probe.hyperlink)
       if (!optionalScalar(rawIndex) || !optionalScalar(link)) return null
-      return { kind: 'click', xpath, textValue: text(title), index: index(rawIndex, 1), hyperlink: text(link) }
+      return { kind: 'click', xpath, textValue: text(title), index: index(rawIndex, 1), hyperlink: scalarText(link) }
     }
     const tracked = enabledMarker(metadata(dataset, 'growing-track', probe.trackValue))
     const result = tracked ? changeValue(probe.elementType, detail ?? record(event?.detail), target, probe.pickerRange, probe.pickerRangeKey) : null

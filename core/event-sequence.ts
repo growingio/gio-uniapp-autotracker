@@ -26,9 +26,15 @@ export class EventSequence {
   }
 
   public next(eventType: AppEventType): number | null {
+    const next = this.peek(eventType)
+    if (next !== null) this.currentValue = next
+    return next
+  }
+
+  /** Allows the composer to validate and enqueue before committing the sequence. */
+  public peek(eventType: AppEventType): number | null {
     if (!SEQUENCED_EVENT_TYPES.has(eventType)) return null
     if (this.currentValue >= Number.MAX_SAFE_INTEGER) throw new Error('event_sequence_overflow')
-    this.currentValue += 1
-    return this.currentValue
+    return this.currentValue + 1
   }
 }

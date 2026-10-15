@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
-import { nextTick } from 'vue'
+import { defineComponent, h, nextTick } from 'vue'
 import { NodeTypes, parse } from '@vue/compiler-dom'
 import { gioUniappAutoTrack, transformAutoTrackSfc, transformAutoTrackTemplate } from '../../autotrack/vite.js'
 import { mountAutoTrackSfc } from '../support/autotrack-fixture.js'
+import { normalizeAutoTrackCall } from '../../runtime/autotrack-normalize.js'
 
 function handlers(code: string): string[] {
   const result: string[] = []
@@ -18,6 +19,90 @@ function handlers(code: string): string[] {
 const source = (template: string, script = 'export default { methods: { save(e) { return e }, cancel(e) { return e } } }') => `<template>${template}</template><script>${script}</script>`
 
 describe('schema v2 Vue instrumentation', () => {
+  it.each([
+    '<view><label-component>raw slot text</label-component></view>',
+    '<label-component v-for="item in [\'A\', \'B\']">{{item}}</label-component>',
+  ])('does not infer picker labels from custom component slots: %s', (option) => {
+    const labelComponent = defineComponent({ setup: () => () => h('text', 'actual rendered label') })
+    const dispatch = vi.fn((probe, event) => normalizeAutoTrackCall(probe, event))
+    const fixture = mountAutoTrackSfc(`<script setup>import { labelComponent } from 'fixture'; const save = event => event</script><template><picker-view data-growing-track @change="save($event)"><picker-view-column>${option}</picker-view-column></picker-view></template>`, dispatch, { fixture: { labelComponent } })
+    try {
+      expect(fixture.elements().some(element => element.text === 'actual rendered label')).toBe(true)
+      fixture.fire(0, 'onChange', { detail: { value: [0] } })
+      expect(dispatch.mock.results[0]?.value).toMatchObject({ textValue: '0' })
+    } finally { fixture.unmount() }
+  })
+  it('preserves a long uni-link destination through its compiled click probe', () => {
+    const href = `https://example.com/detail?return=${'a'.repeat(140)}&item=last`
+    const dispatch = vi.fn((probe, event) => normalizeAutoTrackCall(probe, event))
+    const fixture = mountAutoTrackSfc(`<script setup>const value = 1</script><template><uni-link href="${href.replace(/&/g, '&amp;')}"/></template>`, dispatch)
+    try {
+      fixture.fire(0, 'onClick', {})
+      expect(dispatch.mock.results[0]?.value).toMatchObject({ hyperlink: href })
+    } finally { fixture.unmount() }
+  })
+  it.each(['ignore', 'sensitive'])('retains a static %s exclusion when spread metadata is unavailable in the native event', (marker) => {
+    const read = vi.fn(() => ({ value: true }))
+    const dispatch = vi.fn((probe, event) => normalizeAutoTrackCall(probe, event))
+    const fixture = mountAutoTrackSfc(`<script setup>const save = event => event; const attributes = { title: 'unrelated' }</script><template><switch data-growing-${marker} v-bind="attributes" @change="save($event)"/></template>`, dispatch)
+    try {
+      fixture.fire(0, 'onChange', { currentTarget: { dataset: { growingTrack: true } }, get detail() { return read() } })
+      expect(dispatch.mock.results[0]?.value).toBeNull()
+      expect(read).not.toHaveBeenCalled()
+    } finally { fixture.unmount() }
+  })
+  it.each([
+    '<picker-view-column v-show="ready"><view>A</view></picker-view-column>',
+    '<picker-view-column><view v-for="item in [\'A\', \'B\']" v-show="ready">{{item}}</view></picker-view-column>',
+  ])('uses indices when an otherwise literal picker column has conditional rendering: %s', (columns) => {
+    const dispatch = vi.fn((probe, event) => normalizeAutoTrackCall(probe, event))
+    const fixture = mountAutoTrackSfc(`<script setup>const save = event => event; const ready = true</script><template><picker-view data-growing-track @change="save($event)">${columns}</picker-view></template>`, dispatch)
+    try {
+      fixture.fire(0, 'onChange', { detail: { value: [0] } })
+      expect(dispatch.mock.results[0]?.value).toMatchObject({ textValue: '0' })
+    } finally { fixture.unmount() }
+  })
+  it.each(['v-bind="attributes"', 'v-bind:[attribute]="marker"'])('does not restore static change consent overridden by %s', (binding) => {
+    const business = vi.fn((event) => event)
+    const read = vi.fn(() => ({ value: true }))
+    const dispatch = vi.fn((probe, event) => normalizeAutoTrackCall(probe, event))
+    const fixture = mountAutoTrackSfc(`<script setup>import { business } from 'fixture'; const attributes = { 'data-growing-track': null }; const attribute = 'data-growing-track'; const marker = null</script><template><switch data-growing-track ${binding} @change="business($event)"/></template>`, dispatch, { fixture: { business } })
+    try {
+      // Removing the rendered attribute also removes it from the native dataset.
+      expect(fixture.elements().find(element => element.type === 'switch')?.props['data-growing-track']).toBeNull()
+      const event = { currentTarget: { dataset: {} }, get detail() { return read() } }
+      expect(fixture.fire(0, 'onChange', event)).toBe(event)
+      expect(dispatch.mock.results[0]?.value).toMatchObject({ kind: 'change', textValue: null })
+      expect(read).not.toHaveBeenCalled()
+      expect(business).toHaveBeenCalledExactlyOnceWith(event)
+    } finally { fixture.unmount() }
+  })
+  it('does not copy stale click metadata or picker ranges that a spread can override', () => {
+    const dispatch = vi.fn((probe, event) => normalizeAutoTrackCall(probe, event))
+    const fixture = mountAutoTrackSfc(`<script setup>const save = event => event; const attributes = { 'data-title': null, 'data-index': null, 'data-src': null }; const options = { range: ['live zero', 'live one'] }</script><template><button data-title="stale" data-index="2" data-src="/stale" v-bind="attributes" @click="save($event)"/><picker :range="['old zero', 'old one']" v-bind="options" data-growing-track @change="save($event)"/></template>`, dispatch)
+    try {
+      fixture.fire(0, 'onClick', { currentTarget: { dataset: {} } })
+      fixture.fire(0, 'onChange', { currentTarget: { dataset: { growingTrack: true } }, detail: { value: 1 } })
+      expect(dispatch.mock.results.map(result => result.value)).toEqual([
+        { kind: 'click', xpath: '#save', textValue: null, index: null, hyperlink: null },
+        { kind: 'change', xpath: '#save', textValue: '1' },
+      ])
+    } finally { fixture.unmount() }
+  })
+  it.each([
+    '<view><text v-if="ready">A</text><text v-else>B</text></view>',
+    '<view><text v-for="item in items">A</text></view>',
+    '<view><text v-text="label"/></view>',
+    '<view><text v-show="ready">A</text></view>',
+  ])('uses picker-view indices when nested option text depends on rendering: %s', (option) => {
+    const dispatch = vi.fn((probe, event) => normalizeAutoTrackCall(probe, event))
+    const fixture = mountAutoTrackSfc(`<script setup>const save = event => event; const ready = true; const items = [1, 2]; const label = 'live'</script><template><picker-view data-growing-track @change="save($event)"><picker-view-column>${option}</picker-view-column></picker-view></template>`, dispatch)
+    try {
+      expect(fixture.transformed.warnings).toEqual([])
+      fixture.fire(0, 'onChange', { detail: { value: [0] } })
+      expect(dispatch.mock.results[0]?.value).toMatchObject({ textValue: '0' })
+    } finally { fixture.unmount() }
+  })
   it('静态 picker-view 嵌套文字和注释生成可用选项文案，动态文字回退为下标', () => {
     const template = '<picker-view data-growing-track @change="save($event)"><picker-view-column><view><text>杭州</text><!-- comment --></view><view>上海</view></picker-view-column></picker-view>'
     const fixture = mountAutoTrackSfc(source(template), vi.fn())

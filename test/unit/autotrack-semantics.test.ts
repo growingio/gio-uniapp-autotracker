@@ -1,8 +1,59 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { mountAutoTrackSfc } from '../support/autotrack-fixture.js'
 import { transformAutoTrackSfc } from '../../autotrack/vite.js'
 
 describe('无埋点不得改变 Vue listener 的业务语义', () => {
+  it('keeps the dispatcher distinct from escaped v-for aliases', () => {
+    const source = `<script setup>import { business } from 'fixture'; const items = [1, 2]</script><template><button v-for="\\u0067ioAutoTrack of items" @tap="business($event)"/></template>`
+    for (const instrument of [false, true]) {
+      const business = vi.fn(event => event)
+      const dispatch = vi.fn()
+      const fixture = mountAutoTrackSfc(source, dispatch, { fixture: { business } }, instrument)
+      try {
+        const event = {}
+        expect(fixture.fire(0, 'onTap', event)).toBe(event)
+        expect(fixture.fire(1, 'onTap', event)).toBe(event)
+        expect(business).toHaveBeenCalledTimes(2)
+        expect(dispatch).toHaveBeenCalledTimes(instrument ? 2 : 0)
+      } finally { fixture.unmount() }
+    }
+  })
+  it.each([
+    `<script setup>import { business } from 'fixture'; const \\u0067ioAutoTrack = 1; const save = event => business(event)</script>`,
+    `<script setup>import { business } from 'fixture'; const \\u{67}ioAutoTrack = 1; const save = event => business(event)</script>`,
+    `<script setup>import { business, unused as \\u0067ioAutoTrack } from 'fixture'; const save = event => business(event)</script>`,
+    `<script>import { business, unused } from 'fixture'; export default { methods: { '\\u0067ioAutoTrack': unused, save: event => business(event) } }</script>`,
+    `<script>import { business, unused } from 'fixture'; export default { methods: { '\\x67ioAutoTrack': unused, save: event => business(event) } }</script>`,
+  ])('does not collide with escaped business identifiers or method keys: %s', (script) => {
+    const run = (instrument: boolean) => {
+      const business = vi.fn(event => event)
+      const unused = vi.fn()
+      const dispatch = vi.fn()
+      const fixture = mountAutoTrackSfc(`${script}<template><button @tap="save($event)"/></template>`, dispatch, { fixture: { business, unused } }, instrument)
+      try {
+        const event = { value: 'business' }
+        expect(fixture.fire(0, 'onTap', event)).toBe(event)
+        expect(business).toHaveBeenCalledExactlyOnceWith(event)
+        expect(unused).not.toHaveBeenCalled()
+        if (instrument) expect(dispatch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ eventName: 'save' }), event)
+      } finally { fixture.unmount() }
+    }
+    run(false)
+    run(true)
+  })
+  it('leaves non-JavaScript Unicode escape text intact while selecting the dispatcher alias', () => {
+    const business = vi.fn(event => event)
+    const dispatch = vi.fn()
+    const source = `<script setup>import { business } from 'fixture'</script><template><button @tap="business($event)">literal \\u{110000}</button></template>`
+    const fixture = mountAutoTrackSfc(source, dispatch, { fixture: { business } })
+    try {
+      const event = {}
+      expect(fixture.transformed.code).toContain('literal \\u{110000}')
+      expect(fixture.fire(0, 'onTap', event)).toBe(event)
+      expect(business).toHaveBeenCalledExactlyOnceWith(event)
+      expect(dispatch).toHaveBeenCalledOnce()
+    } finally { fixture.unmount() }
+  })
   it.each(['save!', 'save as Handler', '(save as Handler)!', 'save satisfies Handler', 'save<string>'])('TypeScript 函数引用保持 Vue 的原始调用：%s', (handler) => {
     const source = `<script setup lang="ts">import { save } from 'fixture'; type Handler = (...args: any[]) => unknown</script><template><button @click="${handler}" /></template>`
     expect(transformAutoTrackSfc(source).code).toBe(source)

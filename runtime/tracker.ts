@@ -459,6 +459,7 @@ export class TrackerRuntime {
     if (state === null) return
     state.app.onCollectionResumed()
     state.page.replayCurrentPage()
+    this.autoTrackDispatcher.reset()
     this.persistAfterEvent()
   }
 
