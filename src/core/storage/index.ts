@@ -18,6 +18,48 @@ export function storageKeys(dataSourceId: string): StorageKeys {
   return { identity: `${prefix}identity`, session: `${prefix}session`, meta: `${prefix}meta`, queue: `${prefix}queue:v1` }
 }
 
+type PendingWrite = {
+  value: string
+  result: Promise<StorageWrite>
+  resolve: (result: StorageWrite) => void
+}
+
+/** 每个键独占一个写入槽位；新快照合并到唯一待写项，避免乱序回退与无界 Promise 链。 */
+class LatestStorageWriter {
+  private writing = false
+  private pending: PendingWrite | null = null
+
+  /** 注入当前键的编码写入过程，键之间不互相等待。 */
+  public constructor(private readonly commit: (value: string) => Promise<StorageWrite>) {}
+
+  /** 捕获已编码的不可变值；同一待写批次共用最终最新快照的写入结果。 */
+  public persist(value: string): Promise<StorageWrite> {
+    if (this.pending !== null) {
+      this.pending.value = value
+      return this.pending.result
+    }
+    let resolveResult: (result: StorageWrite) => void = () => undefined
+    const result = new Promise<StorageWrite>(resolve => { resolveResult = resolve })
+    const next = { value, result, resolve: resolveResult }
+    if (this.writing) this.pending = next
+    else {
+      this.writing = true
+      void this.write(next)
+    }
+    return result
+  }
+
+  /** 当前写入无论成功或失败，都继续处理最新待写值。 */
+  private async write(next: PendingWrite): Promise<void> {
+    try { next.resolve(await this.commit(next.value)) }
+    catch { next.resolve({ kind: 'failed' }) }
+    const pending = this.pending
+    this.pending = null
+    if (pending !== null) void this.write(pending)
+    else this.writing = false
+  }
+}
+
 export type IdentityHydration = Readonly<{
   identity: Identity
   source: 'restored' | 'legacy' | 'generated' | 'corrupt' | 'unavailable'
@@ -39,6 +81,7 @@ function isLegacyAppGeneratedDeviceId(deviceId: string): boolean {
 
 /** 恢复一份身份记录，损坏清理仅限本 SDK 当前命名空间的键。 */
 export class IdentityPersistence {
+  private readonly writer = new LatestStorageWriter(value => this.storage.write('state', this.key, value))
   /** 绑定数据源命名空间、宿主存储和设备标识工厂。 */
   public constructor(
     private readonly storage: StoragePort,
@@ -71,7 +114,7 @@ export class IdentityPersistence {
 
   /** 按当前身份信封编码后写入对应存储键。 */
   public persist(identity: Identity): Promise<StorageWrite> {
-    return this.storage.write('state', this.key, serializeIdentityRecord(identity, this.dataSourceId))
+    return this.writer.persist(serializeIdentityRecord(identity, this.dataSourceId))
   }
 
   /** 首次生成身份后尽力持久化，使下次冷启动可恢复；写入失败不阻塞初始化。 */
@@ -119,6 +162,7 @@ function encodeSession(snapshot: SessionSnapshot): string {
 
 /** 会话故障与身份、序号记录隔离，不执行大范围宿主存储清理。 */
 export class SessionPersistence {
+  private readonly writer = new LatestStorageWriter(value => this.storage.write('state', this.key, value))
   /** 绑定会话专属存储键，使会话故障与其他状态隔离。 */
   public constructor(private readonly storage: StoragePort, private readonly key: string) {}
 
@@ -147,7 +191,7 @@ export class SessionPersistence {
   /** 先验证会话快照，再写入带版本的记录；非法值不修改存储。 */
   public persist(snapshot: SessionSnapshot): Promise<StorageWrite> {
     if (!validSessionSnapshot(snapshot)) return Promise.resolve({ kind: 'failed', message: 'invalid_session_snapshot' })
-    return this.storage.write('state', this.key, encodeSession(snapshot))
+    return this.writer.persist(encodeSession(snapshot))
   }
 }
 
@@ -162,6 +206,7 @@ function validMetaSnapshot(value: unknown): value is EventSequenceSnapshot {
 
 /** 独立持久化全局序号，避免身份或会话故障导致编号重置。 */
 export class MetaPersistence {
+  private readonly writer = new LatestStorageWriter(value => this.storage.write('state', this.key, value))
   /** 绑定事件序号专属存储键。 */
   public constructor(private readonly storage: StoragePort, private readonly key: string) {}
 
@@ -186,7 +231,7 @@ export class MetaPersistence {
   /** 只持久化合法的序号快照，避免污染下次启动状态。 */
   public persist(snapshot: EventSequenceSnapshot): Promise<StorageWrite> {
     if (!validMetaSnapshot(snapshot)) return Promise.resolve({ kind: 'failed', message: 'invalid_meta_snapshot' })
-    return this.storage.write('state', this.key, JSON.stringify({ version: 1, expiresAt: null, value: snapshot }))
+    return this.writer.persist(JSON.stringify({ version: 1, expiresAt: null, value: snapshot }))
   }
 
   /** 删除损坏的序号记录并明确返回重置来源。 */
@@ -204,18 +249,19 @@ export type QueueHydration = 'restored' | 'missing' | 'corrupt' | 'unavailable'
 function validRecord(value: unknown): value is PersistedQueue {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
   const record = value as Readonly<Record<string, unknown>>
-  return record.version === 1 && Number.isSafeInteger(record.revision) && typeof record.entries === 'object' && Array.isArray(record.entries)
+  return record.version === 1 && typeof record.revision === 'number' && Number.isSafeInteger(record.revision)
+    && record.revision >= 0 && Array.isArray(record.entries)
 }
 
 /** 将队列快照及其修订号编码到同一 JSON 信封。 */
-function encodeQueue(revision: number, entries: readonly QueueEntry[]): string {
-  return JSON.stringify({ version: 1, revision, entries })
+function encodeQueue(revision: number, entries: string): string {
+  return `{"version":1,"revision":${revision},"entries":${entries}}`
 }
 
-/** 串行写入队列快照，仅在宿主写入成功后推进修订号。 */
+/** 串行写入并合并尚未开始的快照；内存最多保留一份在写和一份待写内容。 */
 export class QueuePersistence {
   private revision = 0
-  private writes: Promise<void> = Promise.resolve()
+  private readonly writer = new LatestStorageWriter(entries => this.write(entries))
 
   /** 绑定队列存储键，并建立按顺序执行的写入链。 */
   public constructor(private readonly storage: StoragePort, private readonly key: string) {}
@@ -241,18 +287,16 @@ export class QueuePersistence {
     }
   }
 
-  /** 捕获调用时快照并串行写入，仅在宿主写入成功后推进修订号。 */
+  /** 捕获不可变 JSON；慢存储期间由最新快照覆盖待写内容，共用该次写入的结果。 */
   public persist(queue: EventQueue): Promise<StorageWrite> {
-    const entries = queue.snapshot()
-    /** 在串行写入真正结算前保留安全的结果回调占位。 */
-    let resolveResult: (result: StorageWrite) => void = () => undefined
-    const result = new Promise<StorageWrite>((resolve) => { resolveResult = resolve })
-    this.writes = this.writes.then(async () => {
-      const nextRevision = this.revision + 1
-      const write = await this.storage.write('queue', this.key, encodeQueue(nextRevision, entries))
-      if (write.kind === 'ok') this.revision = nextRevision
-      resolveResult(write)
-    }).catch(() => resolveResult({ kind: 'failed' }))
+    return this.writer.persist(queue.serializedEntries())
+  }
+
+  /** 唯一写入槽位失败后仍继续最新待写快照，修订号保持安全整数。 */
+  private async write(entries: string): Promise<StorageWrite> {
+    const revision = this.revision === Number.MAX_SAFE_INTEGER ? 1 : this.revision + 1
+    const result = await this.storage.write('queue', this.key, encodeQueue(revision, entries))
+    if (result.kind === 'ok') this.revision = revision
     return result
   }
 

@@ -138,7 +138,7 @@ export class Uploader {
     private readonly onDrop: (drop: UploaderDrop) => void = () => undefined,
     private readonly onQueueChanged: () => void = () => undefined,
     /** 仅在请求实际派发前接收已清理的协议事件。 */
-    private readonly onBeforeDispatch: (events: readonly ProtocolEvent[]) => void = () => undefined,
+    private readonly onBeforeDispatch?: (events: readonly ProtocolEvent[]) => void,
     private readonly canDispatch: () => boolean = () => true,
   ) {}
 
@@ -149,8 +149,8 @@ export class Uploader {
 
   /** 将未被预留的队列事件标记为可发送，并尝试占用空闲上传槽位。 */
   public flush(): void {
-    for (const entry of this.queue.snapshot()) {
-      if (!this.reservedRequests.has(entry.requestId)) this.readyRequests.add(entry.requestId)
+    for (const requestId of this.queue.requestIds()) {
+      if (!this.reservedRequests.has(requestId)) this.readyRequests.add(requestId)
     }
     this.drain()
   }
@@ -232,7 +232,7 @@ export class Uploader {
     }
 
     try {
-      this.onBeforeDispatch(batch.map((entry) => entry.event))
+      this.onBeforeDispatch?.(JSON.parse(requestResult.request.body) as ProtocolEvent[])
     } catch {
       // 调试观察器异常不能改变采集请求的派发语义。
     }
@@ -286,7 +286,7 @@ export class Uploader {
 
   /** 同时检查队列、在途请求和延迟重试，判断是否已完全排空。 */
   private isDrained(): boolean {
-    return this.active === 0 && this.pendingRetries === 0 && this.readyRetries.length === 0 && this.queue.snapshot().length === 0
+    return this.active === 0 && this.pendingRetries === 0 && this.readyRetries.length === 0 && this.queue.size() === 0
   }
 
   /** 状态变化后通知刷新等待者，由各等待者判断是否完成。 */

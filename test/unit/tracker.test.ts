@@ -49,6 +49,29 @@ function createTracker(dataCollect = true, autoTracking = false, debug = false, 
 }
 
 describe('TrackerRuntime', () => {
+  it.each(['missing', 'stale', 'newer'] as const)('序号记录 %s 时不重复使用恢复队列中已经分配的序号', async (mode) => {
+    const storage = new MemoryStorage()
+    const keys = storageKeys('source')
+    const { tracker: first } = createTracker()
+    first.onAppShow({ path: '/home', query: '' })
+    await first.whenReady()
+    first.track('cached_event')
+    const event = { ...first.queuedEvents()[1]!, eventSequenceId: 90 }
+    await storage.write('queue', keys.queue, JSON.stringify({ version: 1, revision: 1, entries: [{ requestId: 'q1', event, retryCount: 0 }] }))
+    if (mode !== 'missing') await storage.write('state', keys.meta,
+      JSON.stringify({ version: 1, expiresAt: null, value: { eventSequenceId: mode === 'newer' ? 100 : 2 } }))
+    const second = new TrackerRuntime({
+      storage, systemContext: { load: async () => system }, clock: { now: () => 100 },
+      timezone: { getOffsetMinutes: () => 0 }, deviceIdFactory: () => 'device-1', sessionIdFactory: () => 'session-new', orientation: () => 'PORTRAIT',
+    })
+    second.init({ accountId: 'account', dataSourceId: 'source' })
+    second.onAppLaunch({ path: '/home', query: '' })
+    second.onAppShow({ path: '/home', query: '' })
+    await second.whenReady()
+    second.track('after_recovery')
+    expect(second.queuedEvents().map(event => event.eventSequenceId)).toEqual([90, mode === 'newer' ? 101 : 91, mode === 'newer' ? 102 : 92])
+  })
+
   it('starts fresh click deduplication when consent creates a replacement PAGE', async () => {
     const { tracker, setNow } = createTracker(true, true)
     tracker.onAppShow({ path: '/home', query: '' })

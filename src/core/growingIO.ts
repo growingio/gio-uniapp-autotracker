@@ -298,7 +298,10 @@ export class TrackerRuntime {
 
     const sessions = new SessionManager(config.sessionPolicy, this.dependencies.sessionIdFactory, hydrated.state.session.snapshot,
       hydrated.state.identity.identity.lastUserId ?? hydrated.state.identity.identity.userId)
-    const sequence = new EventSequence(hydrated.state.meta.snapshot.eventSequenceId)
+    // 队列和序号分别落盘，异常退出可能只保存其中一个；不能复用已分配给缓存事件的序号。
+    const restoredSequence = queue.snapshot().reduce((largest, entry) => typeof entry.event.eventSequenceId === 'number'
+      ? Math.max(largest, entry.event.eventSequenceId) : largest, hydrated.state.meta.snapshot.eventSequenceId)
+    const sequence = new EventSequence(restoredSequence)
     const location = new LocationState()
     const identity = { value: hydrated.state.identity.identity }
     if (!config.idMapping && identity.value.userKey !== null) {
@@ -328,7 +331,7 @@ export class TrackerRuntime {
       config.accountId,
       (drop) => this.log('warn', `[GrowingIO]: upload dropped (${drop.reason})`),
       () => { void queuePersistence.persist(queue) },
-      (events) => this.debugEvents(events),
+      config.debug ? (events) => this.debugEvents(events) : undefined,
       () => this.dependencies.network?.isConnected() !== false,
     )
     const appWithFlush = new AppLifecycle({

@@ -35,6 +35,55 @@ function storage(initial: string | null = null): { port: StoragePort; values: ()
 }
 
 describe('QueuePersistence', () => {
+  it('修订号到达安全整数上限后继续写入可恢复的记录', async () => {
+    const backend = storage(JSON.stringify({ version: 1, revision: Number.MAX_SAFE_INTEGER, entries: [] }))
+    const persistence = new QueuePersistence(backend.port, 'queue')
+    const queue = new EventQueue()
+    expect(await persistence.hydrate(queue)).toBe('restored')
+    queue.enqueue(event(1))
+    expect(await persistence.persist(queue)).toEqual({ kind: 'ok' })
+    const record = JSON.parse(backend.values()[0]!)
+    expect(Number.isSafeInteger(record.revision)).toBe(true)
+    expect(record.revision).toBe(1)
+    expect(await new QueuePersistence(backend.port, 'queue').hydrate(new EventQueue())).toBe('restored')
+  })
+
+  it('负修订号按损坏记录处理', async () => {
+    const backend = storage(JSON.stringify({ version: 1, revision: -1, entries: [] }))
+    expect(await new QueuePersistence(backend.port, 'queue').hydrate(new EventQueue())).toBe('corrupt')
+  })
+
+  it('慢存储期间仅保留一个待写快照，突发更新合并后仍恢复最新队列', async () => {
+    let finish: (result: { kind: 'ok' }) => void = () => { throw new Error('write_not_started') }
+    const values: string[] = []
+    const port: StoragePort = {
+      persistentQueue: true, read: async () => ({ kind: 'missing' }), remove: async () => ({ kind: 'ok' }),
+      write: (_area, _key, value) => {
+        values.push(value)
+        return values.length === 1 ? new Promise(resolve => { finish = resolve }) : Promise.resolve({ kind: 'ok' })
+      },
+    }
+    const queue = new EventQueue()
+    const persistence = new QueuePersistence(port, 'queue')
+    queue.enqueue(event(1))
+    const first = persistence.persist(queue)
+    await Promise.resolve()
+    const pending: Array<Promise<unknown>> = []
+    for (let sequence = 2; sequence <= 200; sequence++) {
+      queue.remove([`q${sequence - 1}`])
+      queue.enqueue(event(sequence))
+      pending.push(persistence.persist(queue))
+    }
+    expect(new Set(pending).size).toBe(1)
+    finish({ kind: 'ok' })
+    await Promise.all([first, ...pending])
+    expect(values).toHaveLength(2)
+    expect(persistence.currentRevision()).toBe(2)
+    const restored = new EventQueue()
+    expect(restored.restore(JSON.parse(values[1]!).entries)).toBe(true)
+    expect(restored.snapshot().map(entry => entry.event.eventSequenceId)).toEqual([200])
+  })
+
   it('serializes writes by revision and restores a cold-start queue', async () => {
     const backend = storage()
     const queue = new EventQueue()

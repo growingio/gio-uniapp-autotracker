@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { EventQueue } from '../../src/core/queue.js'
 import type { TransportPort, TransportResult } from '../../src/types/index.js'
@@ -37,6 +37,34 @@ function runtime(): { value: UploaderRuntime; fireDelay: (delay: number) => void
 }
 
 describe('Uploader', () => {
+  it('日志观察者修改收到的事件后，重试仍发送入队时的原始内容', () => {
+    const queue = new EventQueue()
+    queue.enqueue(event(1))
+    const clocks = runtime()
+    const sent: unknown[] = []
+    const callbacks: Array<(result: TransportResult) => void> = []
+    const uploader = new Uploader(queue, { dispatch: (request, done) => { sent.push(JSON.parse(request.body)); callbacks.push(done) } },
+      clocks.value, 'https://collector.example', 'account', undefined, undefined,
+      events => { (events[0] as Record<string, unknown>).eventName = 'changed_by_observer' })
+    uploader.flush()
+    callbacks[0]!({ kind: 'network' })
+    clocks.fireDelay(800)
+    expect(sent).toEqual([[event(1)], [event(1)]])
+    expect(queue.snapshot()[0]?.event).toEqual(event(1))
+    callbacks[1]!({ kind: 'success', status: 204 })
+    expect(queue.size()).toBe(0)
+  })
+
+  it('离线重复调度只读取标识，不复制整个事件队列', () => {
+    const queue = new EventQueue()
+    for (let index = 1; index <= 200; index++) queue.enqueue(event(index))
+    const snapshot = vi.spyOn(queue, 'snapshot')
+    const uploader = new Uploader(queue, { dispatch: () => { throw new Error('offline') } }, runtime().value,
+      'https://collector.example', 'account', undefined, undefined, undefined, () => false)
+    for (let index = 0; index < 200; index++) uploader.schedule()
+    expect(snapshot).not.toHaveBeenCalled()
+  })
+
   it('App 普通事件立即发送，不设置聚合等待定时器', () => {
     const queue = new EventQueue()
     const clocks = runtime()

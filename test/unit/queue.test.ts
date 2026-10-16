@@ -9,6 +9,61 @@ function event(number: number, value = ''): ProtocolEvent {
 }
 
 describe('EventQueue', () => {
+  it('批次与快照内容被外部改写后，内部队列及字节预算仍保持原值', () => {
+    const queue = new EventQueue()
+    const original: ProtocolEvent = { eventType: 'CUSTOM', eventName: 'immutable', eventSequenceId: 1, attributes: { value: 'original' } }
+    queue.enqueue(original)
+    const batch = queue.claimNextBatch()
+    ;(batch[0]!.event.attributes as Record<string, string>).value = 'changed'.repeat(1000)
+    ;(queue.snapshot()[0]!.event.attributes as Record<string, string>).value = 'snapshot'
+    queue.release(['q1'])
+    expect(queue.snapshot()[0]?.event).toEqual(original)
+    expect(queue.nextBatch()[0]?.event).toEqual(original)
+  })
+
+  it('容量包含持久化修订号字段，Unicode 事件不会在落盘时超过字节限制', () => {
+    const original: ProtocolEvent = { eventType: 'CUSTOM', eventName: 'bounded', eventSequenceId: 1, attributes: { value: '中😀' } }
+    const entry = { requestId: 'q1', event: original, retryCount: 0 }
+    const capacity = Buffer.byteLength(JSON.stringify({ version: 1, revision: Number.MAX_SAFE_INTEGER, entries: [entry] }))
+    const limits = { maxItems: 10, maxPersistedBytes: capacity, maxEventBytes: 500, maxBatchEvents: 10, maxBatchBytes: 500 }
+    const queue = new EventQueue(limits)
+    expect(queue.enqueue(original).ok).toBe(true)
+    expect(Buffer.byteLength(JSON.stringify({ version: 1, revision: Number.MAX_SAFE_INTEGER, entries: queue.snapshot() }))).toBe(capacity)
+    expect(new EventQueue({ ...limits, maxPersistedBytes: capacity - 1 }).enqueue(original)).toEqual({ ok: false, code: 'queue_full' })
+    queue.remove(['q1'])
+    expect(queue.enqueue(original).ok).toBe(true)
+  })
+
+  it('固定种子的 5000 次交错操作保持容量、批次、恢复与快照一致性', () => {
+    const limits = { maxItems: 20, maxPersistedBytes: 5000, maxEventBytes: 1000, maxBatchEvents: 7, maxBatchBytes: 900 }
+    const queue = new EventQueue(limits)
+    let seed = 0x12345678
+    const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed }
+    for (let step = 1; step <= 5000; step++) {
+      const ids = queue.snapshot().map(entry => entry.requestId)
+      switch (random() % 6) {
+        case 0: case 1:
+          queue.enqueue({ eventType: 'CUSTOM', eventName: `event_${step}`, eventSequenceId: step, attributes: { value: '中😀'.repeat(random() % 30) } })
+          break
+        case 2: queue.incrementRetries(ids.slice(0, random() % 10)); break
+        case 3: queue.remove(ids.filter(() => random() % 3 === 0)); break
+        case 4: {
+          const batch = queue.claimNextBatch()
+          expect(batch.length).toBeLessThanOrEqual(limits.maxBatchEvents)
+          expect(Buffer.byteLength(JSON.stringify(batch.map(entry => entry.event)))).toBeLessThanOrEqual(limits.maxBatchBytes)
+          expect(new Set(batch.map(entry => entry.retryCount)).size).toBeLessThanOrEqual(1)
+          queue.release(batch.map(entry => entry.requestId))
+          break
+        }
+        case 5: expect(queue.restore(queue.snapshot())).toBe(true); break
+      }
+      const snapshot = queue.snapshot()
+      expect(snapshot.length).toBeLessThanOrEqual(limits.maxItems)
+      expect(new Set(snapshot.map(entry => entry.requestId)).size).toBe(snapshot.length)
+      expect(Buffer.byteLength(JSON.stringify({ version: 1, revision: Number.MAX_SAFE_INTEGER, entries: snapshot }))).toBeLessThanOrEqual(limits.maxPersistedBytes)
+    }
+  })
+
   it.each([false, true])('allocates distinct recoverable request ids after restoring the largest safe request number (occupied low id: %s)', (occupied) => {
     const queue = new EventQueue()
     const first: ProtocolEvent = { eventType: 'CUSTOM', eventName: 'restored', eventSequenceId: 1 }

@@ -32,6 +32,15 @@ const DEFAULT_LIMITS: QueueLimits = {
   maxBatchBytes: MAX_BATCH_BYTES,
 }
 
+// 为持久化信封预留最长合法修订号，容量判断包含实际落盘字段。
+const QUEUE_ENVELOPE_BYTES = '{"version":1,"revision":9007199254740991,"entries":[]}'.length
+type EncodedEvent = Readonly<{ json: string; bytes: number; entryBytes: number }>
+
+/** 拼接内部生成的条目包装；事件已经是独立 JSON，不能再次执行业务序列化逻辑。 */
+function encodeEntry(entry: QueueEntry, eventJson: string): string {
+  return `{"requestId":${JSON.stringify(entry.requestId)},"event":${eventJson},"retryCount":${entry.retryCount}}`
+}
+
 /** 计算序列化事件的 UTF-8 占用，供单事件、批次和持久化限额判断。 */
 function utf8ByteLength(value: string): number {
   let size = 0
@@ -75,6 +84,9 @@ function cloneEvent(serialized: string): ProtocolEvent | null {
 export class EventQueue {
   private readonly entries: QueueEntry[] = []
   private readonly claimed = new Set<string>()
+  private readonly encoded = new Map<string, EncodedEvent>()
+  private persistedBytes = QUEUE_ENVELOPE_BYTES
+  private serializedSnapshot: string | null = null
   private nextRequestNumber = 1
 
   /** 注入队列条数、事件字节和上传批次等内部限制。 */
@@ -93,11 +105,16 @@ export class EventQueue {
     if (normalized === null) return { ok: false, code: 'event_not_serializable' }
 
     const requestId = this.allocateRequestId()
-    const candidate = [...this.entries, { requestId, event: normalized, retryCount: 0 }]
-    if (utf8ByteLength(JSON.stringify({ version: 1, entries: candidate })) > this.limits.maxPersistedBytes) {
+    const entry = { requestId, event: normalized, retryCount: 0 }
+    const entryBytes = utf8ByteLength(encodeEntry(entry, serialized))
+    const nextBytes = this.persistedBytes + entryBytes + (this.entries.length === 0 ? 0 : 1)
+    if (nextBytes > this.limits.maxPersistedBytes) {
       return { ok: false, code: 'queue_full' }
     }
-    this.entries.push({ requestId, event: normalized, retryCount: 0 })
+    this.entries.push(entry)
+    this.encoded.set(requestId, { json: serialized, bytes: byteLength, entryBytes })
+    this.persistedBytes = nextBytes
+    this.serializedSnapshot = null
     return { ok: true, requestId }
   }
 
@@ -121,18 +138,18 @@ export class EventQueue {
   /** 在数量与字节限制内选取最早批次；并发上传时跳过已占用记录并隔离重试预算。 */
   private selectBatch(excludeClaimed: boolean): readonly QueueEntry[] {
     const batch: QueueEntry[] = []
-    let body = '['
+    let bytes = 2
     for (const entry of this.entries) {
       if (excludeClaimed && this.claimed.has(entry.requestId)) continue
       // 冷启动后的混合队列按剩余重试次数分批，旧事件不能借用新事件的额度。
       if (excludeClaimed && batch.length > 0 && entry.retryCount !== batch[0]!.retryCount) break
       if (batch.length >= this.limits.maxBatchEvents) break
-      const serialized = serializedEvent(entry.event)
-      if (serialized === null) continue
-      const candidate = `${body}${batch.length === 0 ? '' : ','}${serialized}]`
-      if (utf8ByteLength(candidate) > this.limits.maxBatchBytes) break
-      body = candidate.slice(0, -1)
-      batch.push(entry)
+      const encoded = this.encoded.get(entry.requestId)!
+      const nextBytes = bytes + encoded.bytes + (batch.length === 0 ? 0 : 1)
+      if (nextBytes > this.limits.maxBatchBytes) break
+      bytes = nextBytes
+      // 批次和诊断回调均不能修改内部事件，缓存字节数始终对应真实内容。
+      batch.push({ ...entry, event: cloneEvent(encoded.json)! })
     }
     return batch
   }
@@ -143,8 +160,12 @@ export class EventQueue {
     const ids = new Set(requestIds)
     for (let index = this.entries.length - 1; index >= 0; index -= 1) {
       if (ids.has(this.entries[index]!.requestId)) {
-        this.claimed.delete(this.entries[index]!.requestId)
+        const requestId = this.entries[index]!.requestId
+        this.persistedBytes -= this.encoded.get(requestId)!.entryBytes + (this.entries.length > 1 ? 1 : 0)
+        this.encoded.delete(requestId)
+        this.claimed.delete(requestId)
         this.entries.splice(index, 1)
+        this.serializedSnapshot = null
       }
     }
   }
@@ -154,7 +175,17 @@ export class EventQueue {
     const ids = new Set(requestIds)
     for (let index = 0; index < this.entries.length; index += 1) {
       const entry = this.entries[index]!
-      if (ids.has(entry.requestId)) this.entries[index] = { ...entry, retryCount: entry.retryCount + 1 }
+      if (ids.has(entry.requestId) && entry.retryCount < Number.MAX_SAFE_INTEGER) {
+        const next = { ...entry, retryCount: entry.retryCount + 1 }
+        const encoded = this.encoded.get(entry.requestId)!
+        const extraBytes = String(next.retryCount).length - String(entry.retryCount).length
+        // 重试元数据也不能使持久队列越界，无法扩容时保留已用预算。
+        if (this.persistedBytes + extraBytes > this.limits.maxPersistedBytes) continue
+        this.entries[index] = next
+        this.encoded.set(entry.requestId, { ...encoded, entryBytes: encoded.entryBytes + extraBytes })
+        this.persistedBytes += extraBytes
+        this.serializedSnapshot = null
+      }
     }
   }
 
@@ -166,9 +197,17 @@ export class EventQueue {
       event: cloneEvent(JSON.stringify(entry.event))!,
       retryCount: entry.retryCount,
     }))
-    if (new Set(normalized.map((entry) => entry.requestId)).size !== normalized.length
-      || utf8ByteLength(JSON.stringify({ version: 1, entries: normalized })) > this.limits.maxPersistedBytes) return false
+    const encoded = new Map(normalized.map(entry => {
+      const json = JSON.stringify(entry.event)
+      return [entry.requestId, { json, bytes: utf8ByteLength(json), entryBytes: utf8ByteLength(encodeEntry(entry, json)) }]
+    }))
+    const persistedBytes = QUEUE_ENVELOPE_BYTES + [...encoded.values()].reduce((sum, entry) => sum + entry.entryBytes, 0) + Math.max(0, normalized.length - 1)
+    if (encoded.size !== normalized.length || persistedBytes > this.limits.maxPersistedBytes) return false
     this.entries.splice(0, this.entries.length, ...normalized)
+    this.encoded.clear()
+    for (const [id, value] of encoded) this.encoded.set(id, value)
+    this.persistedBytes = persistedBytes
+    this.serializedSnapshot = null
     this.claimed.clear()
     const largestRequestNumber = normalized.reduce((largest, entry) => {
       const match = /^q(\d+)$/.exec(entry.requestId)
@@ -190,7 +229,23 @@ export class EventQueue {
 
   /** 返回事件内容也已复制的队列快照，避免外部修改内部记录。 */
   public snapshot(): readonly QueueEntry[] {
-    return this.entries.map((entry) => ({ ...entry, event: cloneEvent(JSON.stringify(entry.event)) ?? entry.event }))
+    return JSON.parse(this.serializedEntries()) as QueueEntry[]
+  }
+
+  /** 为调度提供轻量标识快照，不复制事件载荷。 */
+  public requestIds(): readonly string[] {
+    return this.entries.map(entry => entry.requestId)
+  }
+
+  /** 读取队列长度，不创建任何事件副本。 */
+  public size(): number {
+    return this.entries.length
+  }
+
+  /** 只在队列内容变化后生成新的不可变 JSON 快照，供持久化合并使用。 */
+  public serializedEntries(): string {
+    this.serializedSnapshot ??= `[${this.entries.map(entry => encodeEntry(entry, this.encoded.get(entry.requestId)!.json)).join(',')}]`
+    return this.serializedSnapshot
   }
 
   /** 校验缓存条目、请求标识、重试次数和完整协议，阻止损坏数据恢复。 */

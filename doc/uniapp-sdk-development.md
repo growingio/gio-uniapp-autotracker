@@ -690,7 +690,7 @@ gio:v1:{dataSourceId}:queue:v1
 gio:v1:{dataSourceId}:meta
 ```
 
-`eventSequenceId` 放在 `meta` 中，作为一份持久化全局计数器：`VISIT`、`PAGE`、`CUSTOM`、`VIEW_CLICK`、`VIEW_CHANGE` 创建时递增，冷启动后继续；其他事件不携带该字段。它不随 session 重置，也不需要任何平台分支。
+`eventSequenceId` 放在 `meta` 中，作为一份持久化全局计数器：`VISIT`、`PAGE`、`CUSTOM`、`VIEW_CLICK`、`VIEW_CHANGE` 创建时递增，冷启动后继续；其他事件不携带该字段。它不随 session 重置，也不需要任何平台分支。恢复时取 `meta` 与有效待发队列中最大事件序号的较大值，避免分别落盘或异常退出使新事件复用队列中已分配的编号。若计数器和历史队列都已丢失，不能据此恢复已上传历史的最大编号。
 
 `PAGE.timestamp` 与该页快照的 `shownAt` 共用同一次构建时取时；CUSTOM / VIEW 的 `pageShowTimestamp` 引用此值，恢复采集补 PAGE 时也更新该关联时间。其余 `timestamp` 由 `ClockPort.now()` 在**每条事件实际创建**时读取，取设备当前系统 Unix 毫秒时间；不得使用入队、重试或发送时间覆盖它，也不因时钟回拨、重复或未来值进行单调化修正。该口径严格对齐 Android 的 `System.currentTimeMillis()`、iOS 的当前 Unix 毫秒时间和 HarmonyOS 的 `Date.now()`；跨事件先后关系只使用 `eventSequenceId`，不能借 `timestamp` 猜测。
 
@@ -770,6 +770,8 @@ interface StoragePort {
 | `queue:v1` | `queue` | 仅 App 三端持久化待发纯 JSON 事件与 retry 元数据；容量或写入失败不宣称可恢复，记录 drop reason；损坏或迁移失败只丢该队列 |
 
 App 适配器的 `persistentQueue=true`，同一队列的读改写由 core 串行化并带 revision，成功落盘后才把它视为“已持久化”；发送中的项目不能被后续快照覆盖。Web/小程序适配器的 `persistentQueue=false`，core 只保留有界内存队列：失败可在当前运行期间重试，但刷新、退出、被回收或冷启动后不恢复。`dataCollect=false` 只阻止后续事件构建、入队和落盘；切换本身不删除既有 queue/state，也不取消已排程或进行中的上传。已存在的待发事件仍按 uploader 的既有生命周期处理；关闭采集不是清除历史数据的 API。身份、session 与序号也不因该开关变化而清理。
+
+`identity`、`session`、`meta` 和 `queue` 各自按键顺序写入，不能依赖宿主写入总是同步完成。每个键最多保留一份在写和一份待写快照：慢写入期间的新更新覆盖唯一待写项，并共用该次最新快照的写入结果；中间快照不会逐个落盘。当前写入失败后仍尝试最新待写项，键之间独立。队列 revision 仅在成功写入时递增，到达安全整数上限后从 1 继续，负值按损坏记录处理；revision 不作为跨运行期全局序号。
 
 ### 9.4 各端存储适配器
 
@@ -864,6 +866,8 @@ Web 和小程序适配器是后续能力，不进入 1.0 发布物；其接口�
 ```
 
 持久化的每条事件必须是纯 JSON。App 队列最多 200 条且完整持久化 queue envelope 总量不超过 2MB；达到任一上限时保留最早的已有事件、丢弃新事件并记录 `queue_full`。写入失败、容量达到上限、JSON 序列化失败都应有可计数的 drop reason，不能无限重试或影响业务 UI。
+
+容量判断包含 revision 字段的最长合法表示、条目包装、逗号及数组边界。事件 JSON 和字节数在接纳时冻结，批次按单事件字节累计；上传调度只读取请求标识和队列长度，不复制整份事件载荷。队列快照、领取批次及发送前观察回调接收独立数据，外部修改不得污染内部记录或后续重试报文。
 
 官方 storage 各端实现不同：App 是持久化存储，H5 和各小程序有自己的容量/清理语义。因此即便一期只做 App，队列接口也要从一开始具备条数和字节上限，为后续扩端留下正确边界。[Storage 文档](https://uniapp.dcloud.net.cn/api/storage/storage.html)
 
