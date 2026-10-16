@@ -96,7 +96,13 @@ export function sanitizeOutboundEvent(event: Readonly<Record<string, unknown>>):
 
 /** 按 Unicode 码点截断字符串，避免拆开合法代理对。 */
 function truncate(value: string, max: number): string {
-  return Array.from(value).slice(0, max).join('')
+  let result = ''
+  let length = 0
+  for (const character of value) {
+    result += character
+    if (++length === max) break
+  }
+  return result
 }
 
 /** 将受支持的基础值和有效 Date 转为属性字符串；不支持的值返回 null。 */
@@ -106,6 +112,28 @@ function normalizeAttributeScalar(value: unknown): string | null {
   if (typeof value === 'number') return Number.isFinite(value) ? String(value) : null
   if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value.toISOString()
   return null
+}
+
+/** 先校验全部数组项，再在 1000 码点预算内拼接，避免短输出分配巨大的临时字符串。 */
+function normalizeAttributeArray(values: readonly unknown[]): string | null {
+  const parts = values.map(normalizeAttributeScalar)
+  if (parts.some(part => part === null)) return null
+  let value = ''
+  let remaining = 1000
+  for (let index = 0; index < parts.length; index++) {
+    if (index > 0) {
+      const delimiter = '||'.slice(0, remaining)
+      value += delimiter
+      remaining -= delimiter.length
+      if (remaining === 0) break
+    }
+    for (const character of parts[index] ?? '') {
+      value += character
+      if (--remaining === 0) break
+    }
+    if (remaining === 0) break
+  }
+  return value
 }
 
 /** 统一属性键和值的长度、数组拼接和冲突处理，丢弃非法属性并返回诊断。 */
@@ -123,8 +151,7 @@ export function normalizeAttributes(input: unknown): NormalizedAttributes {
         diagnostics.push('attribute_invalid_value')
         continue
       }
-      const parts = rawValue.map(normalizeAttributeScalar)
-      value = parts.every((part) => part !== null) ? parts.join('||') : null
+      value = normalizeAttributeArray(rawValue)
     } else {
       value = normalizeAttributeScalar(rawValue)
     }

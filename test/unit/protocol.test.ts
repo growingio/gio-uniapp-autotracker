@@ -11,6 +11,13 @@ const context = {
 }
 
 describe('Protocol core', () => {
+  it('超长 Unicode 属性只保留前 1000 码点，数组尾部非法值仍拒绝整项', () => {
+    const prefix = `${'😀'.repeat(999)}中`
+    const attributes = normalizeAttributes({ scalar: `${prefix}discarded`, list: [`${prefix}discarded`, false], invalid: [prefix, { nested: true }] })
+    expect([...attributes.attributes]).toEqual([['scalar', prefix], ['list', prefix]])
+    expect(attributes.diagnostics).toEqual(['attribute_invalid_value'])
+  })
+
   it('sanitizes only wire-empty values and preserves zero plus string false', () => {
     expect(sanitizeOutboundEvent({ empty: '', nil: null, object: {}, list: [], zero: 0, falseText: 'false' })).toStrictEqual({
       zero: 0,

@@ -19,10 +19,16 @@ const marker = '#__GIO_AUTOTRACK_V2__'
 function literal(value: string): string { return JSON.stringify(value) }
 /** 转义模板属性中的特殊字符，避免生成的监听器破坏 HTML 语法。 */
 function attribute(value: string): string { return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;') }
-/** 按源码偏移从后向前应用替换，保持尚未处理的位置有效。 */
+/** 按源码偏移分段拼接，避免每个监听器替换都复制整份 SFC。 */
 function apply(source: string, replacements: Replacement[]): string {
-  for (const replacement of replacements.sort((a, b) => b.start - a.start)) source = source.slice(0, replacement.start) + replacement.value + source.slice(replacement.end)
-  return source
+  const chunks: string[] = []
+  let end = source.length
+  for (const replacement of replacements.sort((a, b) => b.start - a.start)) {
+    chunks.push(source.slice(replacement.end, end), replacement.value)
+    end = replacement.start
+  }
+  chunks.push(source.slice(0, end))
+  return chunks.reverse().join('')
 }
 /** 只提取可安全复制的静态绑定；可能被覆盖的授权和元数据不作回填。 */
 function bound(element: ElementNode, name: string, preserveExclusion = false): string | null {
