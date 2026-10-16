@@ -23,6 +23,17 @@ pnpm run release:prepare
 
 日常可用 `pnpm test` 快速运行所有测试，或 `pnpm exec vitest run test/unit/uploader.test.ts` 运行指定模块。单模块测试不作为发布前验收结果。
 
+性能和高流量验证使用：
+
+```sh
+pnpm run test:stress
+pnpm run bench:sdk
+```
+
+`test:stress` 运行真实 SDK 的一万次在线事件、两万次离线提交，以及三个固定种子各 5000 次故障交错；断言接纳/拒绝、序号、最多三个并发、重连排空、迟到回调与资源释放。队列单测另覆盖 5000 次固定种子的字节预算、批次和恢复交错。状态存储测试通过故意延迟旧写入，验证冷启动身份不回退，并检查每键最多一份在写和一份待写内容。
+
+`bench:sdk` 输出 `test-results/stress-current.json`，记录队列入队、批次选择、离线调度、长属性、2000 个监听器的 SFC 编译、慢存储堆保留量和写入量，以及完整运行时压力场景。它预热后取 5 或 7 个样本，输出中位数和样本 P95；堆保留量在显式 GC 后读取。耗时只用于同机同环境对比，不设置跨硬件时间门槛，也不代表真实设备或网络吞吐。使用 `node --expose-gc --import tsx scripts/stress-sdk.ts --micro-only --output <文件>` 可仅运行微基准。实测对照与修复记录见[2026-10-16 深度审查](./sdk-deep-review-2026-10-16.md)。
+
 ## 核心功能与对应测试
 
 | 功能 | 验证行为 | 主要测试文件（相对仓库根目录） |

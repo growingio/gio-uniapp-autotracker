@@ -14,6 +14,8 @@
     "test:coverage": "vitest run --coverage",
     "test:release": "pnpm run typecheck && pnpm run test:coverage",
     "test:contract": "vitest run test/protocol-contract test/integration",
+    "test:stress": "vitest run test/integration/sdk-stress.test.ts test/integration/uploader-soak.test.ts",
+    "bench:sdk": "node --expose-gc --import tsx scripts/stress-sdk.ts --output test-results/stress-current.json",
     "build:sdk": "tsx scripts/build-sdk.ts",
     "demo:check": "pnpm run build:sdk && tsc --noEmit -p test/type/tsconfig.compiled-consumer.json && tsx scripts/check-demo.ts",
     "mock:collector": "tsx scripts/mock-collector.ts",
