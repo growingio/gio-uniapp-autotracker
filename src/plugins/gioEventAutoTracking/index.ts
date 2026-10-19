@@ -19,18 +19,39 @@ function optionalScalar(value: unknown): boolean { return value == null || scala
 function scalarText(value: unknown): string | null {
   return scalar(value) ? String(value).replace(/[\u0000-\u001F\u007F]/g, ' ').trim() : null
 }
-/** 将显示文案限制为最多 100 个 Unicode 码点，避免拆开表情字符的代理对。 */
-function text(value: unknown): string | null {
-  const source = scalarText(value)
-  if (source === null) return null
+/** 控制字符归一为空格后也属于文案首尾应去除的空白。 */
+function textWhitespace(character: string): boolean {
+  const code = character.charCodeAt(0)
+  return code <= 0x20 || code === 0x7f || character.trim() === ''
+}
+/** 只构造最多 100 码点的拼接结果；全局首尾裁剪不改变分项内部或分隔符旁的空白。 */
+function displayText(parts: readonly string[]): string {
   let result = ''
   let length = 0
-  for (const character of source) {
-    result += character
-    if (++length === 100) break
+  for (let part = 0; part < parts.length; part += 1) {
+    if (part > 0) {
+      for (const character of '||') {
+        result += character
+        if (++length === 100) return result
+      }
+    }
+    const source = parts[part] as string
+    let start = 0
+    let end = source.length
+    if (part === 0) while (start < end && textWhitespace(source[start] as string)) start += 1
+    if (part === parts.length - 1) while (end > start && textWhitespace(source[end - 1] as string)) end -= 1
+    // 按下标读取原串，避免非 V8 宿主为 slice 分配整段未采集文本。
+    for (let offset = start; offset < end;) {
+      const code = source.codePointAt(offset) as number
+      result += code <= 0x1f || code === 0x7f ? ' ' : String.fromCodePoint(code)
+      offset += code > 0xffff ? 2 : 1
+      if (++length === 100) return result
+    }
   }
   return result
 }
+/** 将显示文案限制为最多 100 个 Unicode 码点，保留整体首尾裁剪，避免整串复制及拆开代理对。 */
+function text(value: unknown): string | null { return scalar(value) ? displayText([String(value)]) : null }
 /** 统一识别空标记、true、1 及其约定字符串形式。 */
 export function enabledMarker(value: unknown): boolean { return value === true || value === '' || value === 'true' || value === 1 || value === '1' }
 /** 只读取对象自身的数据属性，避免执行 dataset 或 range 上的属性访问器。 */
@@ -38,16 +59,18 @@ function ownValue(value: Readonly<Record<string, unknown>>, key: string): unknow
   const field = Object.getOwnPropertyDescriptor(value, key)
   return field !== undefined && 'value' in field ? field.value : undefined
 }
-/** 兼容 dataset 的驼峰与连字符键，并只读取自有值。 */
-function data(dataset: Readonly<Record<string, unknown>> | null, name: string): unknown {
+/** 兼容 dataset 的驼峰与连字符键，区分缺失与存在但不可安全读取的字段。 */
+function dataField(dataset: Readonly<Record<string, unknown>> | null, name: string): PropertyDescriptor | undefined {
   if (dataset === null) return undefined
   const camel = name.replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase())
-  return Object.prototype.hasOwnProperty.call(dataset, camel) ? ownValue(dataset, camel) : ownValue(dataset, name)
+  return Object.getOwnPropertyDescriptor(dataset, camel) ?? Object.getOwnPropertyDescriptor(dataset, name)
 }
+/** 只读取 dataset 自有数据属性，不执行宿主属性访问器。 */
+function data(dataset: Readonly<Record<string, unknown>> | null, name: string): unknown { return dataField(dataset, name)?.value }
 /** 优先使用触发时的 dataset；只有字段确实缺失时才采用受限静态补充。 */
 function metadata(dataset: Readonly<Record<string, unknown>> | null, name: string, fallback: unknown): unknown {
-  const value = data(dataset, name)
-  return value === undefined ? fallback : value
+  const field = dataField(dataset, name)
+  return field === undefined ? fallback : field.value
 }
 /** 判断 dataset 上的隐私或采集标记是否明确启用。 */
 function marked(dataset: Readonly<Record<string, unknown>> | null, name: string): boolean { return enabledMarker(data(dataset, name)) }
@@ -109,7 +132,7 @@ function pickerLabel(range: unknown, at: number, key: unknown): string | null {
 /** 校验并以约定分隔符拼接多选值，再应用文案长度限制。 */
 function scalarArray(value: unknown): string | null {
   const values = arrayValues(value, MAX_RANGE_ITEMS)
-  return values !== null && values.every(scalar) ? text(values.map(String).join('||')) : null
+  return values !== null && values.every(scalar) ? displayText(values.map(String)) : null
 }
 /** 优先将合法 picker 下标映射为文案，缺少可靠范围时保留下标。 */
 function pickerValue(value: unknown, range: unknown, key: unknown): string | null {

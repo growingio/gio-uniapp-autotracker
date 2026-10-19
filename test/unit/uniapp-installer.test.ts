@@ -140,6 +140,31 @@ describe('自动导航标题', () => {
     expect(() => throwing.success()).toThrow(error)
   })
 
+  it('reuses navigation title options without replaying stale SDK wrappers', () => {
+    const { interceptor, target } = titleFixture()
+    const success = vi.fn(() => 'business result')
+    const options = { title: 'first title', success }
+    interceptor.invoke(options)
+    expect(options.success()).toBe('business result')
+    options.title = 'second title'
+    interceptor.invoke(options)
+    expect(options.success()).toBe('business result')
+    expect(target.onPageTitleChanged.mock.calls).toEqual([
+      ['pages/home-1', 'first title'],
+      ['pages/home-1', 'second title'],
+    ])
+    expect(success).toHaveBeenCalledTimes(2)
+
+    const replacement = vi.fn()
+    options.success = replacement
+    options.title = 'third title'
+    interceptor.invoke(options)
+    options.success()
+    expect(replacement).toHaveBeenCalledOnce()
+    expect(success).toHaveBeenCalledTimes(2)
+    expect(target.onPageTitleChanged).toHaveBeenLastCalledWith('pages/home-1', 'third title')
+  })
+
   it('失败调用不更新标题，已卸载页面的迟到回调仍执行业务代码', () => {
     const { hooks, interceptor, target, page } = titleFixture()
     interceptor.invoke({ title: '失败', fail: () => undefined })

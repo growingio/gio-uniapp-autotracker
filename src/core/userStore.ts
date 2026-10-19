@@ -29,10 +29,15 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
 
 /** 按码点验证身份长度并拒绝未配对 UTF-16 代理项。 */
 function isWithinLimit(value: string): boolean {
-  const characters = Array.from(value)
-  // 身份编码器不接受未配对的 UTF-16 代理项，必须在改变身份前拒绝。
-  return characters.length <= IDENTITY_VALUE_MAX_LENGTH
-    && characters.every((character) => character.length > 1 || character.charCodeAt(0) < 0xd800 || character.charCodeAt(0) > 0xdfff)
+  // 一个合法码点最多占两个 UTF-16 单元，明显超长时无需遍历和分配完整字符数组。
+  if (value.length > IDENTITY_VALUE_MAX_LENGTH * 2) return false
+  let length = 0
+  for (const character of value) {
+    if (++length > IDENTITY_VALUE_MAX_LENGTH) return false
+    // 身份编码器不接受未配对的 UTF-16 代理项，必须在改变身份前拒绝。
+    if (character.length === 1 && character.charCodeAt(0) >= 0xd800 && character.charCodeAt(0) <= 0xdfff) return false
+  }
+  return true
 }
 
 /** 校验设备标识、登录字段和最近身份，防止损坏缓存进入运行时。 */

@@ -77,6 +77,37 @@ describe('identity record and mutation semantics', () => {
     expect(updateIdentity(anonymous, 'A', tooLong, true)).toMatchObject({ ok: false, identity: anonymous, changed: false })
   })
 
+  it.each(['userId', 'userKey'] as const)('rejects a huge %s within the identity character budget', (field) => {
+    const tooLong = '😀'.repeat(100_000)
+    const originalIterator = String.prototype[Symbol.iterator]
+    let visited = 0
+    String.prototype[Symbol.iterator] = function () {
+      const tracked = String(this) === tooLong
+      const iterator = originalIterator.call(this)
+      return {
+        [Symbol.iterator]() { return this },
+        next() {
+          if (tracked) visited++
+          return iterator.next()
+        },
+      }
+    }
+    try {
+      const result = field === 'userId'
+        ? updateIdentity(anonymous, tooLong, null, true)
+        : updateIdentity(anonymous, 'A', tooLong, true)
+      expect(result).toMatchObject({ ok: false, identity: anonymous, changed: false })
+      expect(visited).toBeLessThanOrEqual(IDENTITY_VALUE_MAX_LENGTH + 1)
+    } finally {
+      String.prototype[Symbol.iterator] = originalIterator
+    }
+  })
+
+  it('accepts exactly the identity character budget without splitting surrogate pairs', () => {
+    const limit = '😀'.repeat(IDENTITY_VALUE_MAX_LENGTH)
+    expect(updateIdentity(anonymous, limit, limit, true)).toMatchObject({ ok: true, identity: { userId: limit, userKey: limit } })
+  })
+
   it.each(['\ud800', '\udc00', 'before\ud800after'])('rejects unpaired UTF-16 before identity encryption: %j', (value) => {
     expect(updateIdentity(anonymous, value, null, true)).toMatchObject({ ok: false, identity: anonymous, changed: false })
     expect(updateIdentity(anonymous, 'A', value, true)).toMatchObject({ ok: false, identity: anonymous, changed: false })

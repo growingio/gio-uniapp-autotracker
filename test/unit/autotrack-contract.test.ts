@@ -83,6 +83,14 @@ describe('schema v2 normalization', () => {
     expect(normalizeAutoTrackCall(change, { currentTarget: { dataset: { growingTrack: false } }, get detail() { return read() } })).toStrictEqual({ kind: 'change', xpath: '#submitOrder', textValue: null })
     expect(read).not.toHaveBeenCalled()
   })
+  it('does not restore static consent when the runtime dataset owns an unreadable or undefined marker', () => {
+    for (const dataset of [{ growingTrack: undefined }, Object.defineProperty({}, 'growingTrack', { get: () => { throw new Error('host getter') } })]) {
+      const read = vi.fn(() => ({ value: 'private input' }))
+      expect(normalizeAutoTrackCall(change, { currentTarget: { dataset }, get detail() { return read() } }))
+        .toStrictEqual({ kind: 'change', xpath: '#submitOrder', textValue: null })
+      expect(read).not.toHaveBeenCalled()
+    }
+  })
   it.each([
     ['input', { value: 0 }, '0'], ['textarea', { value: '' }, ''], ['radio-group', { value: false }, 'false'],
     ['switch', { value: false }, 'false'], ['switch', { value: true }, 'true'], ['switch', { value: 'false' }, null],
@@ -105,6 +113,20 @@ describe('schema v2 normalization', () => {
     for (const pickerRange of [Array(MAX_RANGE_ITEMS + 1).fill('a'), [[1]], [{ nested: {} }], [new Date()], [{ get name() { throw new Error('host') } }]]) {
       expect(normalizeAutoTrackCall({ ...probe, pickerRange }, { detail: { value: 0 } })).toBeNull()
     }
+  })
+  it('bounds large checkbox labels before concatenating them into display text', () => {
+    const value = Array(1000).fill('x'.repeat(1_000_000))
+    expect(normalizeAutoTrackCall({ ...change, elementType: 'checkbox-group' }, { detail: { value } }))
+      .toStrictEqual({ kind: 'change', xpath: '#submitOrder', textValue: 'x'.repeat(100) })
+  })
+  it.each([
+    ['', ''], ['\u0000\t  a\u0001b\u007f \n', 'a b'], ['😀'.repeat(101), '😀'.repeat(100)],
+    [['  ', ' a ', '  '], '|| a ||'], [['\u0000first\u007f', '\tsecond\n'], 'first || second'],
+    [[`${'a'.repeat(98)} `, 'b'], `${'a'.repeat(98)} |`],
+    [[`${'a'.repeat(98)}😀`, 'b'], `${'a'.repeat(98)}😀|`],
+  ])('preserves control normalization, global whitespace and Unicode limits: %j', (value, expected) => {
+    const elementType = Array.isArray(value) ? 'checkbox-group' : 'input'
+    expect(normalizeAutoTrackCall({ ...change, elementType }, { detail: { value } })?.textValue).toBe(expected)
   })
   it('does not execute range accessors or use inherited dataset metadata', () => {
     const read = vi.fn(() => ['private'])

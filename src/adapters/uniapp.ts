@@ -62,6 +62,7 @@ export function installUniAppLifecycle(app: UniAppVueApp, target: LifecycleTarge
   let nextPageId = 1
   let currentPage: VueInstance | null = null
   const titles = new WeakMap<object, string>()
+  const titleCallbacks = new WeakMap<object, unknown>()
 
   /** 按页面实例缓存桥接器，为同路由的不同实例分配独立标识。 */
   const pageBridge = (instance: VueInstance): PageBridge | null => {
@@ -123,8 +124,10 @@ export function installUniAppLifecycle(app: UniAppVueApp, target: LifecycleTarge
             const page = currentPage
             if (args === null || page === null || typeof args.title !== 'string') return
             const title = args.title
-            const success = args.success
-            args.success = function(this: unknown, ...values: unknown[]) {
+            const previous = args.success
+            // 宿主参数可能重复用于多次调用；剥离自己的旧包装，避免回放过期标题及递归增长。
+            const success = typeof previous === 'function' && titleCallbacks.has(previous) ? titleCallbacks.get(previous) : previous
+            const wrapped = function(this: unknown, ...values: unknown[]) {
               try {
                 if (pages.has(page)) {
                   titles.set(page, title)
@@ -133,6 +136,8 @@ export function installUniAppLifecycle(app: UniAppVueApp, target: LifecycleTarge
               } catch { /* 采集状态更新不得影响业务回调。 */ }
               if (typeof success === 'function') return success.apply(this, values)
             }
+            titleCallbacks.set(wrapped, success)
+            args.success = wrapped
           } catch { /* 不可写的宿主参数保持原样。 */ }
         },
       })
