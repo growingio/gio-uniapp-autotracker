@@ -55,7 +55,7 @@ pnpm demo:check
 | 动态隐私 | 第 4 组反复切换 ignore、sensitive、track，再点击 / 输入 | 隐私标记优先；关闭隐私后恢复采集；track 关闭时不读取 / 上报输入原文 |
 | 禁用标记 | 第 4 组选择 false、0、"0"、"false" | 四种值都不启用 ignore / sensitive / track；点击保留，输入事件不含值 |
 | 敏感类型 | 静态 password，动态 type / password 切换后失焦 | 动态类型始终保守拦截，业务照常执行，不生成自动事件 |
-| 完成事件 | 独立 confirm；input / textarea 三事件控件 | 单独完成事件正常采集；三事件只为 change 插桩，其他原业务回调保留，分别看业务计数 |
+| 完成事件 | 独立 confirm；input / textarea 三事件控件 | 三事件只为 blur 插桩，失焦生成一条 VIEW_CHANGE；独立 confirm 正常采集，其他原业务回调保留 |
 | 冒泡 | 第 1 组点击父层中的子按钮 | 父子不同 xpath 各保留一次，业务总计数增加 2 |
 | 去重与切页 | 连续独立点击重复按钮，去路由页后通过导航返回再点 | 独立操作保留，页面返回后不被此前的去重记录误吞 |
 | 动态列表 | 第 2 组重排、保留 key 修改首项、增删、重置后点商品 | xpath / title / index / hyperlink 都取当前值；复用节点也不串旧数据 |
@@ -66,8 +66,43 @@ pnpm demo:check
 | uni-link 真实组合 | 第 6 组点击链接 | navigator 内部探针和父层监听共同走真实 emit 路径，最终同一交互只发送一次 |
 | 编译边界 | 第 6 组进入“预期不采集”页面 | 函数引用、计算成员、.stop、动态事件名、自定义组件 emit、input 打字均只执行业务；.stop 保留阻止冒泡的行为 |
 
-传统 input 的[官方事件列表](https://uniapp.dcloud.net.cn/component/input.html#属性说明)明确列出 blur / confirm，没有保证 change。demo 的 change 和三事件控件用于核对 SDK 的选择规则及当前宿主是否实际触发；如果 change 未触发，三事件控件也不会回退去采集 blur / confirm，不能把受控测试触发回调当成 App 端支持证据。blur / confirm 用独立控件验收，不从页面代码手动派发生命周期或原生完成事件。
+传统 input 的[官方事件列表](https://uniapp.dcloud.net.cn/component/input.html#属性说明)明确列出 blur / confirm；当前 Android 与鸿蒙 App 输入组件不转发原生 change。SDK 按 `blur → confirm → change` 选择一个已声明的完成事件：三事件控件在 blur 时生成一条 `VIEW_CHANGE`，xpath 使用 `onCompletionBlur`，confirm 和 change 原业务回调保留。独立 change 控件仅观察兼容路径，不能将受控测试中手动触发 change 当成 App 支持证据；仅绑定 change 的业务应改用 blur / confirm。验收时使用真实失焦和键盘完成操作，不从页面代码手动派发生命周期或原生完成事件。
 
 所有 demo 页面均要求无采集编译告警。“预期不采集”页面对边界监听显式声明 `data-growing-ignore`，保留函数引用、计算成员、修饰符、动态事件、自定义组件 emit 和 input 打字的原业务行为。编译器只对可确定启用的静态 ignore 跳过采集边界诊断；ignore 为 false / 0、动态表达式或可能被 v-bind 覆盖时仍保留诊断，语法错误和缺失 handler 也仍会报告。自定义组件内部按钮同样明确 ignore，不会把内部事件混入父组件 emit 的边界验证。
 
 受控集成测试直接编译并挂载这些真实页面和子组件，执行按钮 listener，再经公共 gdp、生产 dispatcher 和协议到模拟 request 接收端。uni-link 使用真实组件组合，不再作为原生标签或空组件替身；测试验证两个探针只产生一条 VIEW_CLICK。它们仍不替代 Android / iOS / HarmonyOS 设备上的原生事件、冒泡、键盘行为和最终 collector 接收验证。
+
+## 鸿蒙实机与自动化
+
+2026-10-19 的实机记录见[鸿蒙验证报告](../doc/harmony-device-validation-2026-10-19.md)。SDK 的 App 运行时不得包含 Unicode 属性正则字面量；当前鸿蒙 JSVM 无法编译该语法，会使整个 demo 白屏。采集地址的 Unicode 扩展能力现已改为按需检测，ASCII 域名和 IP 不依赖该能力。
+
+禁用标记 picker 在本轮设备上出现确认回调缺少下标的情况。demo 会保留原选择，并提供“切换到下一种禁用标记”按钮，实际遍历 false、0、"0"、"false"。边界页的动态事件使用原生 click；动态 tap 在本轮传统 App 宿主没有触发业务回调。
+
+已安装 HBuilderX 官方自动化测试插件及其依赖后，可执行：
+
+```sh
+/Applications/HBuilderX.app/Contents/MacOS/cli uniapp.test app-harmony --project /absolute/path/to/demo --testcaseFile pages/index/harmony-smoke.test.js
+```
+
+测试配置使用 CommonJS，demo 的 `package.json` 为自动生成的配置提供独立模块作用域。插件生成的 `env.js` 包含本机工具路径和设备信息，已排除提交。USB 测试连接可将其中的 `UNI_TEST_CUSTOM_ENV` 配置为 `UNI_AUTOMATOR_HOST: "127.0.0.1"`、`UNI_AUTOMATOR_PORT: "9520"`，并运行 `hdc rport tcp:9520 tcp:9520`。原生点击、键盘和最终收数仍需按报告中的矩阵核对；冒烟用例不替代完整实机验收。
+
+
+## 安卓真机与自动化
+
+2026-10-19 的小米 MI 6 / Android 9 验证见[安卓真机报告](../doc/android-device-validation-2026-10-19.md)，涵盖公共逻辑、原生无埋点交互、上传错误、真实断网、会话超时和进程重启。当前宿主未触发 input/textarea 的原生 change；独立 blur / confirm 已通过。安卓 picker 本轮能正常返回确认下标。
+
+先构建 SDK，并在 `main.ts` 设置测试 collector 地址；使用本机 collector 时可通过 USB 连接。默认 mock collector 端口为 3100：
+
+```sh
+adb reverse tcp:3100 tcp:3100
+```
+
+本轮为隔离此前鸿蒙证据使用 3103，手机保留的验证产物连接 `http://127.0.0.1:3103`。源码中的临时地址已撤回；实际端口需与运行中的测试 collector 及 USB 映射一致。
+
+官方插件的启动冒烟入口：
+
+```sh
+/Applications/HBuilderX.app/Contents/MacOS/cli uniapp.test app-android --project /absolute/path/to/demo --device_id YOUR_DEVICE_ID --testcaseFile pages/index/android-smoke.test.js
+```
+
+用例文件放在页面同级，验证首页六个入口及真实无埋点页的业务回调。完整真机验收另使用 ADB 原生点击、键盘、滑动、Home、网络切换和进程操作，并核对原始请求及 collector 接收；两项启动冒烟不替代完整矩阵。设备与路径配置继续保存在不提交的 `env.js` 中。生产无埋点能力表未因本轮验证自动开放。

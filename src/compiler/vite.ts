@@ -12,7 +12,9 @@ export type AutoTrackTemplateTransform = Readonly<{ code: string; warnings: read
 export type VueSfcTransform = AutoTrackTemplateTransform
 
 type Replacement = Readonly<{ start: number; end: number; value: string }>
-const inputEvents = ['change', 'blur', 'confirm']
+// App 输入组件不会转发原生 change，优先采集实际支持的完成事件。
+// 仅声明 change 的模板仍保留兼容路径，不额外注入业务未声明的监听器。
+const inputEvents = ['blur', 'confirm', 'change']
 const textRenderingDirectives = new Set(['for', 'if', 'else-if', 'else', 'show', 'text', 'html'])
 const marker = '#__GIO_AUTOTRACK_V2__'
 /** 将静态文本编码为安全的 JavaScript 字符串字面量。 */

@@ -22,7 +22,7 @@ xpath = `${id}#${eventName}`
 | 模板或宿主事件 | `id` | `eventName` | 最终 `xpath` |
 |---|---|---|---|
 | `<button id="buy" @tap="submitOrder">` | `buy` | `submitOrder` | `buy#submitOrder` |
-| `<input @change="search">` | 空 | `search` | `#search` |
+| `<input @blur="search">` | 空 | `search` | `#search` |
 | `<view :id="item.id" @click="select(item)">` | 运行时的 `item.id` | `select` | `sku-1#select` |
 | `<uni-link href="/docs">`（没有业务 click） | 空 | `openURL` | `#openURL` |
 | `onTabItemTap({ index: 0 })` | — | `onTabItemTap` | `#onTabItemTap` |
@@ -174,11 +174,11 @@ Options API、普通 `setup()` 与 `<script setup>` 的最终事件口径相同�
 | 动作 | 模板事件 | 生成 `kind` | 名称来源 |
 |---|---|---|---|
 | 点击 | `click` / `tap` | `click` | 业务 handler，或仅在无法取得时为原生事件名 |
-| 输入完成 | `change` / `blur` / `confirm` | `change` | 选中的业务 handler |
+| 输入完成 | 优先 `blur`，其次 `confirm`；仅 `change` 时保留兼容路径 | `change` | 选中的业务 handler |
 | `uni-link` | 自动补充 `click` | `click` | `openURL` |
 | tabBar | `onTabItemTap` | `click` | `onTabItemTap` |
 
-同一 input / textarea 同时声明 `change`、`blur`、`confirm` 时，沿用确定性选择顺序 `change → blur → confirm`，只插入一个 `VIEW_CHANGE` probe；未选中的业务 handler 仍完全保留。`switch`、`slider`、`radio-group`、`checkbox-group`、`picker`、`picker-view`、`swiper` 的 change 支持仍以白名单和三端真机结果为准。
+同一 input / textarea 按确定性顺序 `blur → confirm → change` 选择一个已声明的完成事件，只插入一个 `VIEW_CHANGE` probe；未选中的业务 handler 仍完全保留。传统 App 的输入组件不转发底层 DOM change，因此应使用 blur / confirm；仅声明 change 时保留兼容插桩，不承诺 App 会触发，也不注入未声明的监听器或补发业务事件。选中的监听器含不支持的修饰符或表达式时仍保守跳过，不改用低优先级事件。`switch`、`slider`、`radio-group`、`checkbox-group`、`picker`、`picker-view`、`swiper` 的 change 支持仍以白名单和三端真机结果为准。
 
 ### 4.3 不插桩与告警
 

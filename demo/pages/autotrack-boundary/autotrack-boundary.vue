@@ -34,7 +34,7 @@ import AutoTrackBoundaryEmit from '@/components/auto-track-boundary-emit/auto-tr
 export default {
   components: { AutoTrackBoundaryEmit },
   /** 初始化边界演示状态，不保存实际输入内容。 */
-  data() { return { count: 0, lastAction: '尚未操作。', nativeEventName: 'tap', handlerKey: 'save' } },
+  data() { return { count: 0, lastAction: '尚未操作。', nativeEventName: 'click', handlerKey: 'save' } },
   computed: {
     /** 提供计算成员访问的业务函数，验证不安全表达式保持原样。 */
     handlers() { return { save: this.onComputed } }

@@ -588,7 +588,7 @@ Vite 插件不得直接构建网络事件，它只调用 runtime 的稳定 schem
 
 默认值策略是“只记录组件发生变化”，即 `VIEW_CHANGE` 可带 xpath，但 `elementType` 仅参与内部归一化、不进入协议，`textValue` 默认为 `null`。仅当业务显式标记 `data-growing-track` 且组件不属于敏感类别时，才允许采集规范化后的值。
 
-同一 input / textarea 同时声明 `change`、`blur`、`confirm` 时，Vite 按 `change → blur → confirm` 只选择一个完成事件插针，其他业务 handler 保持原样。宿主重复包装同一事件时，再由 runtime 使用“同对象 + 每页元素窄时间窗”两层去重；不同值的连续修改不能被合并。`0`、`false`、空字符串和空数组不能因真值判断导致整条变化事件丢失。
+同一 input / textarea 的完成事件由 Vite 按 `blur → confirm → change` 只选择一个已声明的监听器插针，其他业务 handler 保持原样。传统 App 不转发输入框的原生 change，应使用 blur / confirm 生成 `VIEW_CHANGE`；仅声明 change 时保留兼容路径，不补发事件或添加监听器。宿主重复包装同一事件时，再由 runtime 使用“同对象 + 每页元素窄时间窗”两层去重；不同值的连续修改不能被合并。`0`、`false`、空字符串和空数组不能因真值判断导致整条变化事件丢失。
 
 官方 `input` 的 `input`、`blur`、`confirm` 事件和平台支持面不同，不能把一个事件字段读取公式复制到所有组件或端上。[input 组件](https://uniapp.dcloud.net.cn/component/input.html)
 

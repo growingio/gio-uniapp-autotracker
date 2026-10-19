@@ -272,6 +272,25 @@ describe('实际 demo 页面中的修复场景', () => {
     expect(received.filter(event => event.eventType === 'VIEW_CHANGE')[0]).not.toHaveProperty('textValue')
   })
 
+  it('原生 picker 未返回有效下标时保留当前隐私标记选项', async () => {
+    const { fixture, received } = await demo('autotrack')
+    fire(fixture, 'false-marker-selector', 'onChange', { value: 2 })
+    for (const value of [undefined, null, '', false, Number.NaN, -1, 4, 'invalid']) {
+      fire(fixture, 'false-marker-selector', 'onChange', { value })
+      expect((fixture.instance as unknown as { falseMarkerIndex: number }).falseMarkerIndex).toBe(2)
+    }
+    expect(received.some(event => event.eventType.startsWith('VIEW_'))).toBe(false)
+  })
+
+  it('备用原生点击入口可依次切换四种禁用标记，且自身不采集', async () => {
+    const { fixture, received } = await demo('autotrack')
+    for (const expected of [1, 2, 3, 0]) {
+      fire(fixture, 'false-marker-next', 'onTap')
+      expect((fixture.instance as unknown as { falseMarkerIndex: number }).falseMarkerIndex).toBe(expected)
+    }
+    expect(received.some(event => event.eventType.startsWith('VIEW_'))).toBe(false)
+  })
+
   it('静态 password 与动态 type/password 在所有状态下都保守拦截', async () => {
     const { fixture, received } = await demo('autotrack')
     let reads = 0
@@ -301,12 +320,24 @@ describe('实际 demo 页面中的修复场景', () => {
     ])
   })
 
-  it.each(['input-all-completions', 'textarea-all-completions'])('%s 只插桩 change，但保留三个原生业务回调', async id => {
+  it.each([
+    ['input-all-completions', ['onConfirm', 'onBlur'], { change: 0, blur: 1, confirm: 1 }],
+    ['textarea-all-completions', ['onBlur'], { change: 0, blur: 1, confirm: 0 }],
+  ] as const)('%s 在原生 change 缺失时仍采集一次完成事件', async (id, listeners, counts) => {
+    const { fixture, received } = await demo('autotrack')
+    for (const name of listeners) fire(fixture, id, name, { value: 'demo-native-completion' })
+    expect((fixture.instance as unknown as { completionCounts: unknown }).completionCounts).toEqual(counts)
+    expect(received.filter(event => event.eventType === 'VIEW_CHANGE')).toMatchObject([
+      { xpath: `${id}#onCompletionBlur`, textValue: 'demo-native-completion' },
+    ])
+  })
+
+  it.each(['input-all-completions', 'textarea-all-completions'])('%s 只插桩 blur，但保留三个原生业务回调', async id => {
     const { fixture, received } = await demo('autotrack')
     for (const name of ['onBlur', 'onConfirm', 'onChange']) fire(fixture, id, name, { value: 'demo-three-events' })
     expect((fixture.instance as unknown as { completionCounts: unknown }).completionCounts).toEqual({ change: 1, blur: 1, confirm: 1 })
     expect(received.filter(event => event.eventType === 'VIEW_CHANGE')).toMatchObject([
-      { xpath: `${id}#onCompletionChange`, textValue: 'demo-three-events' },
+      { xpath: `${id}#onCompletionBlur`, textValue: 'demo-three-events' },
     ])
   })
 
@@ -451,7 +482,8 @@ describe('实际 demo 页面中的修复场景', () => {
   it('负向边界页无编译告警，真实组件 emit 和全部原业务回调仍执行', async () => {
     const { fixture, received } = await demo('autotrack-boundary')
     expect(fixture.transformed.warnings).toEqual([])
-    for (const id of ['boundary-reference', 'boundary-computed', 'boundary-dynamic', 'boundary-emit-inner']) fire(fixture, id, 'onTap')
+    for (const id of ['boundary-reference', 'boundary-computed', 'boundary-emit-inner']) fire(fixture, id, 'onTap')
+    fire(fixture, 'boundary-dynamic', 'onClick')
     const stopped = nativeEvent(fixture, 'boundary-stop', 'onTap')
     fireEvent(fixture, 'boundary-stop', 'onTap', stopped)
     expect(stopped.stopPropagation).toHaveBeenCalledOnce()

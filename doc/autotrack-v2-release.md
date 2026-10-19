@@ -1,6 +1,6 @@
 # 无埋点 schema v2 实施与验证说明
 
-本次代码迁移已实现。Android、iOS、HarmonyOS 的真机验证由接入方执行；尚未以静态测试替代端侧验收，也未发布或打 tag。
+本次代码迁移已实现。[2026-10-19 安卓真机报告](./android-device-validation-2026-10-19.md)和[鸿蒙实机报告](./harmony-device-validation-2026-10-19.md)已记录各自单台设备验收及能力限制；iOS、多设备和生产服务端验收仍待完成，尚未发布或打 tag。
 
 ## 行为与升级
 
@@ -8,6 +8,7 @@
 - Vite 用 Vue SFC/template AST 与 Babel 事件表达式 AST 插桩。可安全分析的显式调用、同步函数与显式调用条件分支可插桩；函数引用、返回函数的条件表达式和复杂组件选项保持原样。普通 `setup()` 保持原实现，通过静态 methods 别名暴露 dispatcher，不复制组件。
 - 双目标 ignore/sensitive、密码、安全密码、文件和动态 type 输入会拒绝整条自动事件。非敏感 change 仅在 track 放行后读取值；swiper 保留 autoplay 与 title 专属规则。
 - change 按组件处理 input、textarea、switch、slider、radio-group、checkbox-group、picker、picker-view、swiper；保留 `0`、`false` 和空值事件。picker 优先使用 range 文案，无法映射时使用规范下标。
+- input / textarea 输入完成按 `blur → confirm → change` 选择一个已声明的监听器，避免 App 不转发原生 change 时漏采；原业务回调保留，上报仍为 `VIEW_CHANGE`。仅声明 change 的输入框应改用 blur / confirm。
 - 同一事件对象去重，加上每 tracker/当前页面的有限正数时间戳窄窗去重；零时间戳不参与窄窗判断。父子不同标识、不同类型和值不会合并。
 - tabBar 为 `#onTabItemTap`、一基 index，pagePath 进入 hyperlink。普通 click 的 data-index 只接受大于 0 且小于 2147483647 的规范十进制整数。
 - v1/v2 编译探针互不兼容。SDK、demo 与使用方 App 必须整体重建，不能混用旧产物；历史结构路径的圈选、看板和规则须按新标识重新配置。
@@ -24,7 +25,7 @@
 
 正式构建继续由 `src/constants/platform.ts` 禁用尚未验收的 autoClick、tabBar 和逐组件 autoChange。demo 的 `vite.config.ts` 独立设置 `__GIO_AUTOTRACK_VERIFICATION__: true`，只用于开放待验收采集链路；该开关不回写生产验收矩阵，正式应用不要复制。
 
-本地验证包括 TypeScript、实际 Vue listener 执行、源 SFC 到协议再到 HTTP mock collector、编译产物消费者类型、demo 结构及 release 包检查。未取得本 SDK 三端真实设备请求与 collector/服务端接收的完整证据。
+本地验证包括 TypeScript、实际 Vue listener 执行、源 SFC 到协议再到 HTTP mock collector、编译产物消费者类型、demo 结构及 release 包检查。安卓与鸿蒙各自单台设备的实际请求和本地 collector 接收证据见上述实机报告；尚未取得三端及生产服务端的完整验收证据。
 
 ## 手工验证入口
 

@@ -242,14 +242,15 @@ describe('schema v2 Vue instrumentation', () => {
     expect(result.warnings.map(warning => warning.code)).toEqual(['event_modifiers', 'missing_handler'])
     expect(transformAutoTrackTemplate('<view data-growing-ignore><button></view>').warnings[0]?.code).toBe('template_parse_error')
   })
-  it('selects change before blur before confirm while preserving unselected listeners', () => {
-    const transformed = transformAutoTrackTemplate('<input @blur="blur($event)" @confirm="confirm($event)" @change="change($event)"/><textarea @confirm="finish($event)"/>')
+  it.each(['input', 'textarea'])('selects blur before confirm before change on %s while preserving unselected listeners', (tag) => {
+    const transformed = transformAutoTrackTemplate(`<${tag} @change="change($event)" @confirm="confirm($event)" @blur="blur($event)"/><${tag} @change="change($event)" @confirm="finish($event)"/>`)
     const listeners = handlers(transformed.code)
-    expect(listeners[0]).toBe('blur($event)')
+    expect(listeners[0]).toBe('change($event)')
     expect(listeners[1]).toBe('confirm($event)')
-    expect(listeners[2]).toContain('eventName:"change"')
-    expect(listeners[3]).toContain('eventName:"finish"')
-    const unsupported = transformAutoTrackTemplate('<input @change.stop="change($event)" @blur="blur($event)"/>')
+    expect(listeners[2]).toContain('eventName:"blur"')
+    expect(listeners[3]).toBe('change($event)')
+    expect(listeners[4]).toContain('eventName:"finish"')
+    const unsupported = transformAutoTrackTemplate(`<${tag} @blur.stop="blur($event)" @change="change($event)"/>`)
     expect(unsupported.changed).toBe(false)
   })
   it('passes dynamic and static privacy markers and conservatively marks bound type and password inputs', () => {

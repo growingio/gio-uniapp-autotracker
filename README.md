@@ -79,7 +79,7 @@ export default defineConfig(async () => {
 
 异步导入支持未声明 `"type": "module"` 的现有 Vite 配置，不要求更改整个业务工程的模块类型。uni_modules 将上面的导入路径替换为 `./uni_modules/gio-uniapp-autotracker/vite.js`。已使用 ESM 配置的工程也可静态导入，详见[安装说明](./doc/release.md)。
 
-无埋点仅处理当前白名单内的内置组件静态 `@click`、`@tap` 与 `@change`；input/textarea 也可采集单独声明的 `@blur` 或 `@confirm`。普通模板 `xpath` 在 runtime 按小程序口径生成 `id#eventName`；`uni-link` 使用 `#openURL`，tabBar 使用 `#onTabItemTap`。同一元素同时声明 `change`、`blur`、`confirm` 时只选择一个完成事件插针，原业务 handler 全部保留。`data-growing-ignore` 和敏感输入会拒绝整条采集，`data-growing-track` 不能覆盖敏感规则；非敏感 `change` 值仅在显式标记 track 时传递。`data-index` 仅接受大于 0 且小于 2147483647 的整数。动态事件、自定义组件、修饰符及歧义 listener 表达式保持业务代码不变、不插桩并产生构建告警。`.nvue` 不在一期模板插桩范围内，也会产生构建告警。完整规则见[无埋点方案](./doc/uniapp-autotrack-design.md)。
+无埋点处理当前白名单内的内置组件静态 `@click`、`@tap` 与 `@change`；input/textarea 的输入完成采集优先使用 `@blur`，未声明 blur 时使用 `@confirm`。普通模板 `xpath` 在 runtime 按小程序口径生成 `id#eventName`；`uni-link` 使用 `#openURL`，tabBar 使用 `#onTabItemTap`。input/textarea 按 `blur → confirm → change` 只选择一个已声明的完成事件插针，原业务 handler 全部保留。传统 App 不转发输入框的原生 change；仅声明 `@change` 时保留兼容插桩，但不会补发事件，应改用 blur / confirm。`data-growing-ignore` 和敏感输入会拒绝整条采集，`data-growing-track` 不能覆盖敏感规则；非敏感 `change` 值仅在显式标记 track 时传递。`data-index` 仅接受大于 0 且小于 2147483647 的整数。动态事件、自定义组件、修饰符及歧义 listener 表达式保持业务代码不变、不插桩并产生构建告警。`.nvue` 不在一期模板插桩范围内，也会产生构建告警。完整规则见[无埋点方案](./doc/uniapp-autotrack-design.md)。
 
 业务行为不变是插桩的前提。可安全分析的显式调用（如 `save($event)`）、带简单首参数的同步函数和两侧均为显式调用的简单条件表达式可以插桩。`@click="save"`、`actions.save`、条件返回函数、复杂组件选项等保持源码原样并告警，不会擅自改成调用。需要精确采集这些交互时可在业务原有 handler 中调用 `gdp('track', ...)`，不要为了消除告警随意改写业务模板。
 
@@ -89,7 +89,7 @@ export default defineConfig(async () => {
 
 编译侧 Vue 解析器固定为 `3.4.21`，随 Vite 工具打包，与 App 运行时隔离。SDK 上报版本固定取包版本，不能由 `init` 参数覆盖。
 
-自动测试与 HBuilderX 编译检查不等于三端真机验收。Android、iOS、HarmonyOS 的设备请求和服务端接收证据仍须在正式发布前补齐，验收边界见[无埋点发布说明](./doc/autotrack-v2-release.md)。
+自动测试与 HBuilderX 编译检查不等于三端真机验收。[2026-10-19 安卓真机报告](./doc/android-device-validation-2026-10-19.md)和[鸿蒙实机报告](./doc/harmony-device-validation-2026-10-19.md)已记录各自单台设备的原生交互、实际请求与本地 collector 接收结果及能力限制；iOS、多设备及生产服务端验收仍待补齐，发布边界见[无埋点发布说明](./doc/autotrack-v2-release.md)。
 
 `src/constants/platform.ts` 的能力表同时参与无埋点运行时门控。当前三端 `autoClick`、`tabBar` 和逐组件 `autoChange` 全部为 `false`，因此默认不发送模板或 tabBar 的 `VIEW_*`。待对应端的编译版本、真机请求和 collector 接收记录归档后，再逐项开放；单元测试使用内部受控宿主配置；demo 通过专用构建常量 `__GIO_AUTOTRACK_VERIFICATION__` 显式开放待验收链路，便于实机验证。验证开关不会改变生产验收状态，正式应用不要复制。
 

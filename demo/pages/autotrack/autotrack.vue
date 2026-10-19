@@ -104,14 +104,14 @@
       <text class="case-title">textarea 同时声明 blur / confirm</text>
       <textarea id="note" v-model="note" data-growing-track placeholder="输入备注后完成" @blur="onInputComplete($event)" @confirm="onInputComplete($event)" />
       <text class="expected">预期：只选择 blur 插桩，业务事件仍按原声明执行</text>
-      <text class="case-title">confirm 与 SDK 的 change 选择规则</text>
-      <text class="expected">传统 input 官方完成事件为 blur / confirm；change 为 SDK 分支及宿主兼容性核对，不保证 App 会触发。三事件控件若没有 change，则不会改用 blur / confirm 采集，应记录业务计数和真实触发结果，不视为该端验收通过。</text>
+      <text class="case-title">输入完成事件选择规则</text>
+      <text class="expected">输入框优先在失焦时采集；没有 blur 监听时采集 confirm。传统 App 不转发 input / textarea 的原生 change，独立 change 控件仅用于观察兼容性。</text>
       <input id="input-change" data-growing-track placeholder="仅填演示值：核对宿主是否触发 change" @change="onInputChange($event)" />
       <input id="input-confirm" data-growing-track confirm-type="done" placeholder="仅填演示值，点键盘完成" @confirm="onInputConfirm($event)" />
       <textarea id="textarea-confirm" data-growing-track confirm-type="done" placeholder="textarea 单独 confirm" @confirm="onInputConfirm($event)" />
       <input id="input-all-completions" data-growing-track placeholder="同时绑定 change / blur / confirm" @change="onCompletionChange($event)" @blur="onCompletionBlur($event)" @confirm="onCompletionConfirm($event)" />
       <textarea id="textarea-all-completions" data-growing-track placeholder="textarea 同时绑定三个完成事件" @change="onCompletionChange($event)" @blur="onCompletionBlur($event)" @confirm="onCompletionConfirm($event)" />
-      <text class="expected">单独事件分别采集 onInputChange / onInputConfirm；三事件控件只为 change 插桩，blur / confirm 业务仍执行。宿主未触发某个原生事件时，不会人为补发。</text>
+      <text class="expected">三事件控件失焦时各产生一条 VIEW_CHANGE，xpath 为 input-all-completions#onCompletionBlur / textarea-all-completions#onCompletionBlur；键盘确认的业务回调保留。独立 confirm 采集 onInputConfirm，独立 change 仅在宿主实际触发时采集。</text>
       <text class="status-text">三事件控件业务次数：change={{ completionCounts.change }}，blur={{ completionCounts.blur }}，confirm={{ completionCounts.confirm }}</text>
 
       <text class="case-title">动态隐私开关</text>
@@ -123,6 +123,7 @@
       <text class="expected">ignore / sensitive 任一开启则整条自动事件拦截；两者关闭时点击可采集，输入只在 track 开启时带值。反复开关使用触发时的新状态。</text>
 
       <picker id="false-marker-selector" :range="falseMarkerLabels" :value="falseMarkerIndex" data-growing-ignore @change="selectFalseMarker($event)"><view class="tap-card">禁用标记值：{{ falseMarkerLabels[falseMarkerIndex] }}</view></picker>
+      <button id="false-marker-next" data-growing-ignore @tap="nextFalseMarker($event)">切换到下一种禁用标记</button>
       <button id="false-marker-click" :data-growing-ignore="falseMarkers[falseMarkerIndex]" :data-growing-sensitive="falseMarkers[falseMarkerIndex]" @tap="onDynamicPrivacyAction($event)">false / 0 / "0" / "false" 不启用隐私标记</button>
       <input id="false-marker-input" :data-growing-track="falseMarkers[falseMarkerIndex]" placeholder="仅填演示值：禁用标记不放行原文" @blur="onInputComplete($event)" />
       <text class="expected">四种值都不阻止点击；输入有 VIEW_CHANGE，但没有 textValue。</text>
@@ -317,7 +318,19 @@ export default {
     /** 只记录业务动作，用于观察隐私标记是否仅影响采集。 */
     onDynamicPrivacyAction() { this.mark('动态隐私按钮业务') },
     /** 切换 false 或零等禁用标记样本，核对标记解释一致性。 */
-    selectFalseMarker(event) { this.falseMarkerIndex = Number(event.detail.value); this.mark('禁用标记值已更新') },
+    selectFalseMarker(event) {
+      const value = event?.detail?.value
+      const index = typeof value === 'number' || (typeof value === 'string' && value.trim() !== '') ? Number(value) : Number.NaN
+      if (!Number.isInteger(index) || index < 0 || index >= this.falseMarkers.length) {
+        this.mark('选择未生效，请再次选择或使用切换按钮')
+        return false
+      }
+      this.falseMarkerIndex = index
+      this.mark('禁用标记值已更新')
+      return true
+    },
+    /** 通过普通原生点击循环四种标记，供选择器未返回有效下标的宿主使用。 */
+    nextFalseMarker() { this.falseMarkerIndex = (this.falseMarkerIndex + 1) % this.falseMarkers.length; this.mark('禁用标记值已切换') },
     /** 更新动态输入类型开关。 */
     toggleInputType(event) { this.numericInput = event.detail.value; this.mark('动态 type 已更新') },
     /** 更新动态密码属性，验证敏感输入的保守拒绝规则。 */

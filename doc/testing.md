@@ -67,4 +67,4 @@ pnpm run bench:sdk
 
 ## 验证边界
 
-这些测试运行真实 SDK 代码，替换 uni 宿主、时间、存储和网络等外部依赖；HTTP 链路使用本地 mock collector。它们证明代码行为，不代表 Android/iOS/HarmonyOS 真机、签名打包或生产服务端验收。生产平台能力表不会因代码测试通过而自动开启。
+这些测试运行真实 SDK 代码，替换 uni 宿主、时间、存储和网络等外部依赖；HTTP 链路使用本地 mock collector。它们证明代码行为，不代表 Android/iOS/HarmonyOS 真机、签名打包或生产服务端验收。生产平台能力表不会因代码测试通过而自动开启。独立的[安卓真机报告](./android-device-validation-2026-10-19.md)和[鸿蒙实机报告](./harmony-device-validation-2026-10-19.md)分别记录了单台设备的真实原生交互、设备上传、本地 collector 接收结果和宿主限制。
