@@ -51,14 +51,23 @@ function encodeLabel(label: string): string | null {
 /**
  * 为缺少 URL 的 App 提供常见国际化域名回退：规范宽度、分隔点和大小写，拒绝控制符、私用字符、未配对代理项及首位组合标记，再执行 RFC 3492 编码。
  * 此处不实现完整 UTS #46；具备 URL 的宿主使用自身 IDNA 实现，回退路径不依赖额外 Unicode 映射表。
+ * 缺少 Unicode 扩展能力时继续接受 ASCII 主机，非 ASCII 主机保守拒绝，不中断 SDK 加载。
  */
 function asciiDomain(host: string): string | null {
-  const normalized = host.replace(/[\u3002\uFF0E\uFF61]/g, '.').normalize('NFKC')
-    .replace(/./gu, (character) => character.toLowerCase()).normalize('NFC')
-  if (/[\p{C}\p{Z}]/u.test(normalized)) return null
+  let normalized = host.toLowerCase()
+  let leadingMark: RegExp | null = null
+  if (/[^\x00-\x7F]/.test(host)) {
+    try {
+      normalized = host.replace(/[\u3002\uFF0E\uFF61]/g, '.').normalize('NFKC')
+        .replace(/./gu, (character) => character.toLowerCase()).normalize('NFC')
+      // 必须使用字符串构造：部分 App JSVM 不支持属性转义，字面量会令整个业务脚本编译失败。
+      if (new RegExp('[\\p{C}\\p{Z}]', 'u').test(normalized)) return null
+      leadingMark = new RegExp('^\\p{M}', 'u')
+    } catch { return null }
+  }
   const labels: string[] = []
   for (const label of normalized.split('.')) {
-    if (/^\p{M}/u.test(label)) return null
+    if (leadingMark?.test(label)) return null
     const encoded = /[^\x00-\x7F]/.test(label) ? encodeLabel(label) : label
     if (encoded === null || !/^[a-z\d_-]*$/.test(encoded)) return null
     labels.push(encoded)

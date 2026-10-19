@@ -8,6 +8,31 @@ const required = { accountId: ' account ', dataSourceId: ' source ' }
 describe('normalizeInitOptions', () => {
   afterEach(() => vi.unstubAllGlobals())
 
+  it('accepts ASCII collectors without URL or Unicode normalization support', () => {
+    vi.stubGlobal('URL', undefined)
+    const normalize = vi.spyOn(String.prototype, 'normalize').mockImplementation(() => { throw new Error('Unicode unavailable') })
+    try {
+      expect(normalizeInitOptions({ ...required, serverUrl: 'HTTP://COLLECTOR.EXAMPLE:3100' })).toMatchObject({
+        ok: true, config: { serverUrl: 'http://collector.example:3100' },
+      })
+    } finally { normalize.mockRestore() }
+  })
+
+  it('rejects non-ASCII collectors safely when Unicode property escapes are unavailable', () => {
+    vi.stubGlobal('URL', undefined)
+    const NativeRegExp = RegExp
+    vi.stubGlobal('RegExp', new Proxy(NativeRegExp, {
+      construct(target, args) {
+        if (String(args[0]).includes('\\p{')) throw new SyntaxError('Unicode properties unavailable')
+        return Reflect.construct(target, args)
+      },
+    }))
+    expect(normalizeInitOptions({ ...required, serverUrl: 'https://收集.example' })).toStrictEqual({ ok: false, code: 'invalid_server_url' })
+    expect(normalizeInitOptions({ ...required, serverUrl: 'https://COLLECTOR.EXAMPLE' })).toMatchObject({
+      ok: true, config: { serverUrl: 'https://collector.example' },
+    })
+  })
+
   it.each([
     ['HTTPS://Collector.Example.com:443/', 'https://collector.example.com'],
     ['http://localhost:80', 'http://localhost'],
