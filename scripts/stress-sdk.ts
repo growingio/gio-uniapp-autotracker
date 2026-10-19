@@ -7,9 +7,12 @@ import { EventQueue } from '../src/core/queue.js'
 import { QueuePersistence } from '../src/core/storage/index.js'
 import { normalizeAttributes, type ProtocolEvent } from '../src/core/dataStore/protocol.js'
 import { Uploader } from '../src/core/uploader.js'
+import { updateIdentity } from '../src/core/userStore.js'
 import { transformAutoTrackSfc } from '../src/compiler/vite.js'
+import { normalizeAutoTrackCall } from '../src/plugins/gioEventAutoTracking/index.js'
 import type { StoragePort, StorageWrite } from '../src/types/index.js'
 import { runRuntimeStress } from './sdk-stress-scenarios.js'
+import { runRecoveryStress } from './sdk-recovery-stress.js'
 
 /** 使用真实协议形态构造确定性负载，避免宿主、网络和随机时间影响比较。 */
 function event(sequence: number, size = 4096): ProtocolEvent {
@@ -58,12 +61,30 @@ const uploader = new Uploader(queue, { dispatch: () => { throw new Error('offlin
 }, 'https://collector.invalid', 'stress', undefined, undefined, undefined, () => false)
 measurements.push(measure('offline_schedule_200', 200, () => { for (let call = 0; call < 200; call++) uploader.schedule() }))
 const longText = '😀'.repeat(1_000_000)
+measurements.push(measure('long_identity_10', 10, () => {
+  for (let call = 0; call < 10; call++) {
+    const result = updateIdentity({ deviceId: 'stress-device', userId: null, userKey: null }, longText, null, true)
+    assert.equal(result.ok, false)
+    assert.equal(result.changed, false)
+  }
+}, 7))
 measurements.push(measure('long_attribute_10', 10, () => {
   for (let call = 0; call < 10; call++) assert.equal(normalizeAttributes({ text: longText }).attributes.get('text'), '😀'.repeat(1000))
 }, 5))
 const longArray = Array<string>(100).fill('😀'.repeat(100_000))
 measurements.push(measure('long_attribute_array_3', 3, () => {
   for (let call = 0; call < 3; call++) assert.equal(normalizeAttributes({ text: longArray }).attributes.get('text'), '😀'.repeat(1000))
+}, 5))
+const longDisplayText = ` \u0000${longText}\n`
+measurements.push(measure('autotrack_long_text_10', 10, () => {
+  for (let call = 0; call < 10; call++) assert.equal(normalizeAutoTrackCall({
+    schemaVersion: 2, source: 'template', kind: 'change', eventName: 'save', elementType: 'input', trackValue: true,
+  }, { detail: { value: longDisplayText } })?.textValue, '😀'.repeat(100))
+}, 5))
+measurements.push(measure('autotrack_long_array_3', 3, () => {
+  for (let call = 0; call < 3; call++) assert.equal(normalizeAutoTrackCall({
+    schemaVersion: 2, source: 'template', kind: 'change', eventName: 'save', elementType: 'checkbox-group', trackValue: true,
+  }, { detail: { value: longArray } })?.textValue, '😀'.repeat(100))
 }, 5))
 const largeSfc = `<script setup>const save = event => event</script><template><view>${Array.from({ length: 2000 }, (_, index) => `<button id="button-${index}" @tap="save($event)">Button ${index}</button>`).join('')}</view></template>`
 measurements.push(measure('compiler_2000_handlers', 2000, () => {
@@ -105,7 +126,10 @@ const report = {
   environment: { node: process.version, platform: platform(), arch: arch(), cpu: cpus()[0]?.model, gcAvailable: typeof globalThis.gc === 'function' },
   measurements,
   persistenceBurst: { calls: pending.length, burstMs, retainedHeapBytes, writes, bytesWritten, queueBytes: Buffer.byteLength(latest) },
-  runtimeStress: process.argv.includes('--micro-only') ? undefined : await runRuntimeStress(),
+  runtimeStress: process.argv.includes('--micro-only') ? undefined
+    : process.argv.includes('--extended') ? await runRuntimeStress(100_000, 200_000) : await runRuntimeStress(),
+  recoveryStress: process.argv.includes('--micro-only') ? undefined
+    : process.argv.includes('--extended') ? await runRecoveryStress(250, 190) : await runRecoveryStress(),
 }
 const output = process.argv[process.argv.indexOf('--output') + 1]
 if (process.argv.includes('--output') && output !== undefined) {
